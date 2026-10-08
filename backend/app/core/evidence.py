@@ -52,7 +52,7 @@ def compute_dense_clip_scene(clip_path: str) -> List[Dict[str, Any]]:
         from backend.app.core.detector import get_detector
         from backend.app.core.attributes import analyze_crop_color
         detector = get_detector()
-        detector.set_classes(["car", "truck", "bus", "person", "motorcycle", "bicycle"])
+        detector.set_classes(["car", "suv", "van", "truck", "bus", "motorcycle", "scooter", "bicycle", "person", "vehicle"])
         model = detector.model
     except Exception as e:
         logger.error(f"Error initializing detector for clip scene: {e}")
@@ -70,9 +70,17 @@ def compute_dense_clip_scene(clip_path: str) -> List[Dict[str, Any]]:
         a2 = max(1.0, (b2[2] - b2[0]) * (b2[3] - b2[1]))
         return inter / (a1 + a2 - inter)
 
+    def are_labels_compatible(l1, l2):
+        if l1 == l2: return True
+        v_types = {"car", "suv", "van", "truck", "bus", "vehicle"}
+        two_types = {"motorcycle", "scooter", "bicycle"}
+        if l1 in v_types and l2 in v_types: return True
+        if l1 in two_types and l2 in two_types: return True
+        return False
+
     active_tracks = []
     for f_idx in range(0, total_frames, step):
-        res = model.predict(frames[f_idx], conf=0.18, verbose=False)[0]
+        res = model.predict(frames[f_idx], conf=0.14, verbose=False)[0]
         cur_dets = []
         for b in res.boxes:
             cls_id = int(b.cls[0])
@@ -91,19 +99,20 @@ def compute_dense_clip_scene(clip_path: str) -> List[Dict[str, Any]]:
         matched_tracks = set()
         matched_dets = set()
         for d_i, det in enumerate(cur_dets):
-            best_score = 0.15
+            best_score = 0.12
             best_t = None
             for t in active_tracks:
                 if t["track_id"] in matched_tracks:
                     continue
                 last_box = t["points"][max(t["points"].keys())]
                 score = iou(last_box, det["bbox"])
-                if score > best_score and det["label"] == t["label"]:
+                if score > best_score and are_labels_compatible(det["label"], t["label"]):
                     best_score = score
                     best_t = t
             if best_t:
                 best_t["points"][f_idx] = det["bbox"]
                 best_t["colors"].append(det["color"])
+                best_t["labels"].append(det["label"])
                 best_t["confs"].append(det["conf"])
                 matched_tracks.add(best_t["track_id"])
                 matched_dets.add(d_i)
@@ -113,6 +122,7 @@ def compute_dense_clip_scene(clip_path: str) -> List[Dict[str, Any]]:
                 t_obj = {
                     "track_id": next_id,
                     "label": det["label"],
+                    "labels": [det["label"]],
                     "colors": [det["color"]],
                     "confs": [det["conf"]],
                     "points": {f_idx: det["bbox"]}
@@ -125,9 +135,19 @@ def compute_dense_clip_scene(clip_path: str) -> List[Dict[str, Any]]:
 
     # Convert tracks to full-length per-frame dense trajectories
     scene_objects = []
-    valid_tracks = [t for t in tracks if len(t["points"]) >= 3]
+    valid_tracks = [t for t in tracks if len(t["points"]) >= 2]
     for t in valid_tracks:
         dom_color = max(set(t["colors"]), key=t["colors"].count)
+        dom_raw_label = max(set(t.get("labels", [t["label"]])), key=t.get("labels", [t["label"]]).count)
+        
+        # Canonical label
+        if dom_raw_label in ("suv", "van", "vehicle"):
+            c_label = "car"
+        elif dom_raw_label in ("scooter", "motorbike"):
+            c_label = "motorcycle"
+        else:
+            c_label = dom_raw_label
+            
         avg_conf = round(float(np.mean(t["confs"])), 2)
         f_min = min(t["points"].keys())
         f_max = max(t["points"].keys())
@@ -154,7 +174,7 @@ def compute_dense_clip_scene(clip_path: str) -> List[Dict[str, Any]]:
         scene_objects.append({
             "event_id": f"clip_track_{t['track_id']}",
             "tracking_id": str(t["track_id"]),
-            "concept": t["label"],
+            "concept": c_label,
             "color": dom_color,
             "clothing": "",
             "has_bag": False,

@@ -94,13 +94,34 @@ def analyze_crop_color(crop: np.ndarray, concept: Optional[str] = None) -> Tuple
         return "brown", float(min(1.0, brown_ratio * 2.0))
 
     # Achromatic checks: White / Light, Gray / Silver, Black / Dark
+    # Check body panel (lower-middle section without sky reflections and tires)
+    h_b, w_b = body.shape[:2]
+    if h_b >= 6 and w_b >= 6:
+        panel = body[int(h_b * 0.25):int(h_b * 0.88), int(w_b * 0.10):int(w_b * 0.90)]
+        if panel.size > 0:
+            p_hsv = cv2.cvtColor(panel, cv2.COLOR_BGR2HSV)
+            p_v = p_hsv[:, :, 2]
+            p_s = p_hsv[:, :, 1]
+            dark_ratio = np.mean(p_v < 85)
+            bright_ratio = np.mean((p_v > 125) & (p_s < 45))
+            med_v = np.median(p_v)
+            
+            # Robust black detection: dark lower body panels (even with reflections)
+            if dark_ratio >= 0.40 or (med_v < 90 and bright_ratio < 0.35):
+                return "black", float(min(1.0, 0.70 + dark_ratio * 0.3))
+            
+            # Robust white detection: bright body panels with low saturation
+            if bright_ratio >= 0.42 and med_v >= 135:
+                return "white", float(min(1.0, 0.70 + bright_ratio * 0.3))
+
     mean_v = np.mean(v)
     mean_s = np.mean(s)
+    med_v = np.median(v)
 
-    if mean_s < 38 and mean_v >= 115:
+    if mean_s < 38 and (mean_v >= 115 or med_v >= 130):
         return "white", float(min(1.0, mean_v / 255.0))
-    elif mean_v < 60:
-        return "black", float(min(1.0, 1.0 - mean_v / 255.0))
+    elif mean_v < 75 or med_v < 75 or np.mean(v < 80) >= 0.40:
+        return "black", float(min(1.0, 0.85))
     else:
         return "gray", 0.85
 

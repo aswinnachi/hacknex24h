@@ -928,17 +928,33 @@ function stopEvidenceTracker() {
     }
 }
 
-let showAllSceneObjects = false;
+let showAllSceneObjects = true;
 let activeQueryFilter = null;
+
+const COLOR_PALETTES = {
+    red: { stroke: "#ef4444", fill: "rgba(239, 68, 68, 0.12)", badgeBg: "#ef4444", badgeText: "#ffffff" },
+    black: { stroke: "#38bdf8", fill: "rgba(15, 23, 42, 0.35)", badgeBg: "#0f172a", badgeText: "#38bdf8" },
+    white: { stroke: "#eab308", fill: "rgba(234, 179, 8, 0.12)", badgeBg: "#eab308", badgeText: "#0f172a" },
+    blue: { stroke: "#3b82f6", fill: "rgba(59, 130, 246, 0.12)", badgeBg: "#3b82f6", badgeText: "#ffffff" },
+    green: { stroke: "#10b981", fill: "rgba(16, 185, 129, 0.12)", badgeBg: "#10b981", badgeText: "#ffffff" },
+    yellow: { stroke: "#f59e0b", fill: "rgba(245, 158, 11, 0.12)", badgeBg: "#f59e0b", badgeText: "#0f172a" },
+    gray: { stroke: "#94a3b8", fill: "rgba(148, 163, 184, 0.12)", badgeBg: "#475569", badgeText: "#ffffff" },
+    silver: { stroke: "#cbd5e1", fill: "rgba(203, 213, 225, 0.12)", badgeBg: "#475569", badgeText: "#ffffff" },
+    orange: { stroke: "#f97316", fill: "rgba(249, 115, 22, 0.12)", badgeBg: "#f97316", badgeText: "#ffffff" },
+    brown: { stroke: "#b45309", fill: "rgba(180, 83, 9, 0.12)", badgeBg: "#b45309", badgeText: "#ffffff" }
+};
 
 const OBJECT_PALETTES = {
     car: { stroke: "#eab308", fill: "rgba(234, 179, 8, 0.12)", badgeBg: "#eab308", badgeText: "#0f172a" },
+    suv: { stroke: "#eab308", fill: "rgba(234, 179, 8, 0.12)", badgeBg: "#eab308", badgeText: "#0f172a" },
+    van: { stroke: "#eab308", fill: "rgba(234, 179, 8, 0.12)", badgeBg: "#eab308", badgeText: "#0f172a" },
     truck: { stroke: "#22c55e", fill: "rgba(34, 197, 94, 0.12)", badgeBg: "#22c55e", badgeText: "#0f172a" },
     person: { stroke: "#ec4899", fill: "rgba(236, 72, 153, 0.14)", badgeBg: "#ec4899", badgeText: "#ffffff" },
     bicycle: { stroke: "#ef4444", fill: "rgba(239, 68, 68, 0.14)", badgeBg: "#ef4444", badgeText: "#ffffff" },
     "traffic light": { stroke: "#3b82f6", fill: "rgba(59, 130, 246, 0.14)", badgeBg: "#3b82f6", badgeText: "#ffffff" },
     bus: { stroke: "#f97316", fill: "rgba(249, 115, 22, 0.14)", badgeBg: "#f97316", badgeText: "#ffffff" },
     motorcycle: { stroke: "#06b6d4", fill: "rgba(6, 182, 212, 0.12)", badgeBg: "#06b6d4", badgeText: "#0f172a" },
+    scooter: { stroke: "#06b6d4", fill: "rgba(6, 182, 212, 0.12)", badgeBg: "#06b6d4", badgeText: "#0f172a" },
     bag: { stroke: "#a855f7", fill: "rgba(168, 85, 247, 0.14)", badgeBg: "#a855f7", badgeText: "#ffffff" },
     backpack: { stroke: "#a855f7", fill: "rgba(168, 85, 247, 0.14)", badgeBg: "#a855f7", badgeText: "#ffffff" },
     suitcase: { stroke: "#a855f7", fill: "rgba(168, 85, 247, 0.14)", badgeBg: "#a855f7", badgeText: "#ffffff" }
@@ -1113,7 +1129,8 @@ function startEvidenceTracker(evidence) {
             if (bw <= 0 || bh <= 0) continue;
 
             const cKey = (obj.concept || "object").toLowerCase();
-            const pal = OBJECT_PALETTES[cKey] || { stroke: "#38bdf8", fill: "rgba(56,189,248,0.12)", badgeBg: "#38bdf8", badgeText: "#0f172a" };
+            const colKey = (obj.color || "").toLowerCase();
+            const pal = COLOR_PALETTES[colKey] || OBJECT_PALETTES[cKey] || { stroke: "#38bdf8", fill: "rgba(56,189,248,0.12)", badgeBg: "#38bdf8", badgeText: "#0f172a" };
 
             if (!obj.is_target) {
                 // STANDARD SCENE OBJECT (Matching user reference image)
@@ -1785,7 +1802,7 @@ function setupEventListeners() {
                 btnToggleAllBoxes.textContent = "👁️ All Objects: ON";
                 btnToggleAllBoxes.classList.add("active");
             } else {
-                btnToggleAllBoxes.textContent = "🎯 Query Matches Only";
+                btnToggleAllBoxes.textContent = "🎯 Target Only";
                 btnToggleAllBoxes.classList.remove("active");
             }
             if (activeTrackerRender) {

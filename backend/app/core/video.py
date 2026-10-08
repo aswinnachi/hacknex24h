@@ -79,9 +79,8 @@ def process_video_job(job_id: str, camera_id: str, video_path: str, frame_interv
         frames_analyzed = 0
         
         detector = get_detector()
-        # Atomic, robust classes for zero-shot open vocabulary detection (including traffic light)
         detection_classes = [
-            "person", "car", "motorcycle", "bicycle", "truck", "bus", "traffic light",
+            "person", "car", "suv", "van", "motorcycle", "scooter", "bicycle", "truck", "bus", "vehicle", "traffic light",
             "bag", "backpack", "handbag", "suitcase", "umbrella", "phone", "bottle"
         ]
         
@@ -121,7 +120,13 @@ def process_video_job(job_id: str, camera_id: str, video_path: str, frame_interv
                             if tid is None:
                                 tid = det_idx + 1
                                 
-                            label = det["label"]
+                            raw_label = det["label"]
+                            if raw_label in ("suv", "van", "vehicle"):
+                                label = "car"
+                            elif raw_label in ("scooter", "motorbike"):
+                                label = "motorcycle"
+                            else:
+                                label = raw_label
                             bbox = det["bbox"]
                             conf = det["confidence"]
                             
