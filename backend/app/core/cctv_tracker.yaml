@@ -1,0 +1,8 @@
+# Optimized ByteTrack configuration for CCTV video intelligence
+tracker_type: bytetrack
+track_high_thresh: 0.35
+track_low_thresh: 0.15
+new_track_thresh: 0.35
+track_buffer: 90
+match_thresh: 0.70
+fuse_score: True

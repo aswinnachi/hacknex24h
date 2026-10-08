@@ -1,0 +1,40 @@
+# ==============================================================================
+# Multi-Stream Video Intelligence — Production Dependencies
+# Compatible with macOS Apple Silicon (MPS), Linux (CUDA), and CPU
+# ==============================================================================
+
+# Core Web Framework & Server
+fastapi>=0.115.0
+uvicorn[standard]>=0.30.0
+pydantic>=2.8.0
+pydantic-settings>=2.4.0
+python-dotenv>=1.0.0
+python-multipart>=0.0.9
+
+# Computer Vision & Image Processing
+opencv-python>=4.10.0
+pillow>=10.4.0
+numpy>=1.26.0,<2.0.0
+
+# Deep Learning Framework (PyTorch + Torchvision)
+torch>=2.2.0
+torchvision>=0.17.0
+
+# Open-Vocabulary Object Detection & Tracking
+ultralytics>=8.3.0
+lap>=0.5.12
+pyyaml>=6.0.0
+
+# Semantic Multimodal Embeddings & Search (SigLIP / CLIP)
+transformers>=4.40.0
+huggingface-hub>=0.23.0
+sentencepiece>=0.2.0
+protobuf>=5.0.0
+ftfy>=6.2.0
+regex>=2024.5.15
+faiss-cpu>=1.8.0
+
+# HTTP & System Utilities
+requests>=2.32.0
+psutil>=5.9.0
+tqdm>=4.66.0

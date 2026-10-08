@@ -1,0 +1,121 @@
+[
+  {
+    "id": "Q01",
+    "query": "Show the white car",
+    "expected_verdict": "MATCH",
+    "expected_object": "car",
+    "expected_color": "white",
+    "description": "Direct object + color query matching white vehicle in video"
+  },
+  {
+    "id": "Q02",
+    "query": "Show the moving white car",
+    "expected_verdict": "MATCH",
+    "expected_object": "car",
+    "expected_action": "moving",
+    "expected_color": "white",
+    "description": "Multi-attribute query (object + color + movement verification)"
+  },
+  {
+    "id": "Q03",
+    "query": "Show the red car",
+    "expected_verdict": "NO MATCH",
+    "expected_object": "car",
+    "expected_color": "red",
+    "description": "Strict color negative grounding test (must reject white car)"
+  },
+  {
+    "id": "Q04",
+    "query": "Show the moving red car",
+    "expected_verdict": "NO MATCH",
+    "expected_object": "car",
+    "expected_color": "red",
+    "description": "Strict composite negative grounding test (must reject white car)"
+  },
+  {
+    "id": "Q05",
+    "query": "Show the person",
+    "expected_verdict": "MATCH",
+    "expected_object": "person",
+    "description": "Pedestrian retrieval grounded in actual video detections"
+  },
+  {
+    "id": "Q06",
+    "query": "Show the moving person",
+    "expected_verdict": "MATCH",
+    "expected_object": "person",
+    "expected_action": "moving",
+    "description": "Pedestrian trajectory tracking & movement verification"
+  },
+  {
+    "id": "Q07",
+    "query": "Show the person with a bag",
+    "expected_verdict": "NO MATCH",
+    "expected_object": "person",
+    "requires_bag": true,
+    "description": "Composite relation test (must reject person without bag)"
+  },
+  {
+    "id": "Q08",
+    "query": "Show the motorcycle",
+    "expected_verdict": "NO MATCH",
+    "expected_object": "motorcycle",
+    "description": "Negative object class test (must reject bicycles / cars)"
+  },
+  {
+    "id": "Q09",
+    "query": "How many people passed through the camera?",
+    "expected_verdict": "COUNT RESULT",
+    "expected_object": "person",
+    "min_count": 1,
+    "description": "Real track counting (COUNT(DISTINCT tracking_id))"
+  },
+  {
+    "id": "Q10",
+    "query": "How many cars passed through the camera?",
+    "expected_verdict": "COUNT RESULT",
+    "expected_object": "car",
+    "min_count": 1,
+    "description": "Real vehicle track counting"
+  },
+  {
+    "id": "Q11",
+    "query": "Did a red car pass?",
+    "expected_verdict": "NO",
+    "description": "Boolean verification query with negative ground truth"
+  },
+  {
+    "id": "Q12",
+    "query": "Did the white car pass?",
+    "expected_verdict": "YES",
+    "description": "Boolean verification query with positive ground truth"
+  },
+  {
+    "id": "Q13",
+    "query": "What objects were detected?",
+    "expected_verdict": "INVENTORY",
+    "description": "Video object inventory summary extraction"
+  },
+  {
+    "id": "Q14",
+    "query": "What happened in the first 5 seconds?",
+    "expected_verdict": "MATCH",
+    "max_timestamp": 5.0,
+    "description": "Temporal upper-bound bounded search (0 - 5.0 seconds)"
+  },
+  {
+    "id": "Q15",
+    "query": "Did a vehicle pass through the main gate?",
+    "expected_verdict": "YES",
+    "requires_memory": "main gate",
+    "description": "Clarify-Once persistent memory landmark resolution"
+  },
+  {
+    "id": "Q16",
+    "query": "Did a vehicle pass the unknown perimeter fence?",
+    "expected_verdict": "CLARIFICATION REQUIRED",
+    "should_clarify": true,
+    "missing_reference": "unknown perimeter fence",
+    "description": "Clarification trigger validation on unmapped location"
+  }
+]

@@ -1,0 +1,60 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual Environment
+venv/
+.venv/
+env/
+.env
+
+# Database
+*.sqlite3
+*.db
+database/*.db
+
+# OS & IDE
+.DS_Store
+.idea/
+.vscode/
+
+# Heavy Media & Model Weights (Downloaded automatically via setup.sh)
+weights/*
+!weights/.keep
+models/*
+!models/.keep
+*.pt
+*.bin
+*.safetensors
+*.onnx
+
+# Video Files & Generated Runtimes
+*.mp4
+*.avi
+*.mov
+*.mkv
+data/videos/*
+data/clips/*
+data/frames/*
+data/debug_frames/*
+data/vector_index/*
+!data/.keep
+!database/.keep
