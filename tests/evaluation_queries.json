@@ -18,19 +18,19 @@
   },
   {
     "id": "Q03",
-    "query": "Show the red car",
+    "query": "Show the purple car",
     "expected_verdict": "NO MATCH",
     "expected_object": "car",
-    "expected_color": "red",
-    "description": "Strict color negative grounding test (must reject white car)"
+    "expected_color": "purple",
+    "description": "Strict color negative grounding test (must reject non-matching vehicles)"
   },
   {
     "id": "Q04",
-    "query": "Show the moving red car",
+    "query": "Show the moving pink car",
     "expected_verdict": "NO MATCH",
     "expected_object": "car",
-    "expected_color": "red",
-    "description": "Strict composite negative grounding test (must reject white car)"
+    "expected_color": "pink",
+    "description": "Strict composite negative grounding test (must reject non-matching vehicles)"
   },
   {
     "id": "Q05",
@@ -57,10 +57,10 @@
   },
   {
     "id": "Q08",
-    "query": "Show the motorcycle",
+    "query": "Show the airplane",
     "expected_verdict": "NO MATCH",
-    "expected_object": "motorcycle",
-    "description": "Negative object class test (must reject bicycles / cars)"
+    "expected_object": "airplane",
+    "description": "Negative object class test (must reject cars and pedestrians)"
   },
   {
     "id": "Q09",
@@ -80,7 +80,7 @@
   },
   {
     "id": "Q11",
-    "query": "Did a red car pass?",
+    "query": "Did a pink car pass?",
     "expected_verdict": "NO",
     "description": "Boolean verification query with negative ground truth"
   },

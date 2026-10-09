@@ -16,7 +16,7 @@ router = APIRouter()
 
 class QueryRequest(BaseModel):
     query: str
-    top_k: int = 5
+    top_k: int = 16
     camera_id: Optional[str] = None
 
 class TimeFilterInfo(BaseModel):
@@ -311,9 +311,10 @@ def execute_natural_language_query(request: QueryRequest):
 
     # 5. Handle SEARCH / YES_NO / TEMPORAL_SEARCH with Strict Semantic Retrieval & Attribute Grounding
     embedder = get_embedder()
+    dim = getattr(embedder, "dimension", 768)
     query_vector = embedder.embed_text(visual_concept) if embedder.available else None
     if query_vector is None:
-        query_vector = [0.0] * 512
+        query_vector = [0.0] * dim
         
     matches, debug_trace = vector_search.search_by_text(
         text_vector=query_vector,
@@ -345,17 +346,18 @@ def execute_natural_language_query(request: QueryRequest):
         top_match = matches[0]
         c_name = top_match["concept"]
         attr = top_match.get("attributes") or {}
+        display_name = "auto-rickshaw" if (attr.get("is_auto") or req_obj == "auto" or c_name == "auto") else c_name
         color_str = f"{attr.get('color')} " if attr.get("color") and attr.get("color") != "unknown" else ""
-        if c_name in ("car", "bus", "truck", "motorcycle", "bicycle", "vehicle"):
+        if c_name in ("car", "bus", "truck", "motorcycle", "bicycle", "vehicle", "auto"):
             moving_str = "moving " if attr.get("is_moving") else ""
         else:
             act = attr.get('action') or ('moving' if attr.get('is_moving') else 'stationary')
             moving_str = f"{act} " if attr.get("is_moving") else ""
         
         # Construct exact description
-        desc = f"{color_str}{moving_str}{c_name}".strip()
+        desc = f"{color_str}{moving_str}{display_name}".strip()
         if not desc:
-            desc = c_name
+            desc = display_name
         if forbid_bag:
             desc = "person (verified without bag/backpack)"
         elif req_accessories:
@@ -385,10 +387,24 @@ def execute_natural_language_query(request: QueryRequest):
                 summary = f"No, the detected person (Track #{top_match.get('tracking_id')}) is verified without a bag or backpack."
         elif intent == "YES_NO":
             verdict = "YES"
-            summary = f"Yes, {desc} was detected in {top_match['camera']} at {top_match['timestamp']:.2f}s."
+            if total_matches > 1:
+                summary = f"Yes, {total_matches} instances of {desc} were detected across camera streams (Track #{top_match.get('tracking_id')} in {top_match['camera']} at {top_match['timestamp']:.2f}s, plus {total_matches - 1} more shown below)."
+            else:
+                summary = f"Yes, {desc} was detected in {top_match['camera']} at {top_match['timestamp']:.2f}s (Track ID #{top_match.get('tracking_id')})."
         else:
             verdict = "MATCH"
-            summary = f"Verified {desc} detected in {top_match['camera']} (Track ID #{top_match.get('tracking_id')})."
+            if total_matches > 1:
+                plural_concept = f"{req_obj}s" if (req_obj and not req_obj.endswith("s")) else f"{c_name}s"
+                if req_obj == "person" or c_name == "person":
+                    plural_concept = "people"
+                elif req_obj == "auto" or attr.get("is_auto"):
+                    plural_concept = "auto-rickshaws"
+                col_prefix = f"{req_color} " if req_color else ""
+                mov_prefix = "moving " if (req_action == "moving" or (attr.get('is_moving') and req_obj in ("car", "vehicle"))) else ""
+                cam_label = f"in {camera_id}" if camera_id else "across camera streams"
+                summary = f"Found {total_matches} verified {col_prefix}{mov_prefix}{plural_concept} {cam_label} (Track #{top_match.get('tracking_id')} at {top_match['timestamp']:.2f}s, plus {total_matches - 1} more instances shown below)."
+            else:
+                summary = f"Verified {desc} detected in {top_match['camera']} (Track ID #{top_match.get('tracking_id')} at {top_match['timestamp']:.2f}s)."
     else:
         # NO MATCH / NO
         verdict = "NO" if intent == "YES_NO" else "NO MATCH"

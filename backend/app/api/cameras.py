@@ -98,6 +98,34 @@ def get_camera_summary(camera_id: str):
         "message": f"Analysis is currently {status}"
     }
 
+@router.get("/cameras/{camera_id}/scene")
+def get_camera_scene(camera_id: str):
+    row = execute_query("SELECT id, name, video_path, duration, width, height FROM cameras WHERE id = ?", (camera_id,), fetch=True, fetch_one=True)
+    if not row:
+        raise HTTPException(status_code=404, detail="Camera not found")
+    cam = dict(row)
+    video_path = cam.get("video_path")
+    if not video_path or not os.path.exists(video_path):
+        return {
+            "camera_id": camera_id,
+            "camera_name": cam.get("name"),
+            "duration": cam.get("duration", 10.0),
+            "video_width": cam.get("width") or 848,
+            "video_height": cam.get("height") or 478,
+            "scene_objects": []
+        }
+    
+    from backend.app.core.evidence import compute_dense_clip_scene
+    scene_objects = compute_dense_clip_scene(video_path)
+    return {
+        "camera_id": camera_id,
+        "camera_name": cam.get("name"),
+        "duration": cam.get("duration", 10.0),
+        "video_width": cam.get("width") or 848,
+        "video_height": cam.get("height") or 478,
+        "scene_objects": scene_objects
+    }
+
 @router.get("/jobs/{job_id}")
 def get_processing_job_status(job_id: str):
     status = get_job_status(job_id)

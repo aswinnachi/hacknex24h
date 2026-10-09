@@ -10,11 +10,11 @@ from backend.app.db.database import execute_query
 CLIPS_DIR = "data/clips"
 os.makedirs(CLIPS_DIR, exist_ok=True)
 
-def compute_dense_clip_scene(clip_path: str) -> List[Dict[str, Any]]:
+def compute_dense_clip_scene(clip_path: str, clip_start: float = 0.0, clip_end: float = 10.0) -> List[Dict[str, Any]]:
     """
-    Computes per-frame, ground-truth YOLO-World detections and multi-object trajectories
-    across the video clip. Results in continuous moving boundary coordinates for all objects.
-    Caches to {clip_path}.scene.json for instant subsequent retrieval.
+    Retrieves per-frame ground-truth multi-object trajectories across the video clip.
+    Instantly slices from pre-computed source camera scenes when available,
+    avoiding live neural network inference during HTTP requests.
     """
     if not os.path.exists(clip_path):
         return []
@@ -27,19 +27,57 @@ def compute_dense_clip_scene(clip_path: str) -> List[Dict[str, Any]]:
         except Exception:
             pass
 
+    # Instant slicing from camera source scene cache for generated clips
+    import glob
+    if "/clips/" in clip_path:
+        parts = clip_path.split("/clips/")
+        if len(parts) == 2:
+            cam_sub = parts[1].split("/")[0]
+            cam_scenes = glob.glob(f"data/videos/{cam_sub}/*.scene.json")
+            if cam_scenes:
+                try:
+                    with open(cam_scenes[0], "r") as f:
+                        full_scene = json.load(f)
+                    fps = 24.0
+                    start_f = int(clip_start * fps)
+                    end_f = int(clip_end * fps)
+                    
+                    clip_objs = []
+                    for obj in full_scene:
+                        boxes = obj.get("bounding_boxes", [])
+                        if not boxes:
+                            continue
+                        sliced = boxes[start_f:end_f]
+                        if not any(b and len(b) >= 4 and (b[0] > 0 or b[2] > 0) for b in sliced):
+                            continue
+                        
+                        obj_copy = dict(obj)
+                        obj_copy["bounding_boxes"] = sliced
+                        clip_objs.append(obj_copy)
+
+                    if clip_objs:
+                        try:
+                            with open(cache_path, "w") as f:
+                                json.dump(clip_objs, f)
+                        except Exception:
+                            pass
+                        return clip_objs
+                except Exception as e:
+                    logger.warning(f"Error slicing scene from {cam_scenes[0]}: {e}")
+
     cap = cv2.VideoCapture(clip_path)
     if not cap.isOpened():
         return []
 
     total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-    fps = cap.get(cv2.CAP_PROP_FPS) or 25.0
+    fps = cap.get(cv2.CAP_PROP_FPS) or 24.0
     frames = []
     while True:
         ret, f = cap.read()
         if not ret:
             break
         frames.append(f)
-        if len(frames) >= 200:
+        if len(frames) >= 400:
             break
     cap.release()
 
@@ -346,7 +384,7 @@ def generate_evidence_clip(
     target_concept = event["concept"].lower()
 
     if os.path.exists(clip_filename):
-        clip_scene = compute_dense_clip_scene(clip_filename)
+        clip_scene = compute_dense_clip_scene(clip_filename, clip_start=clip_start, clip_end=clip_end)
         if clip_scene:
             scene_objects = clip_scene
             

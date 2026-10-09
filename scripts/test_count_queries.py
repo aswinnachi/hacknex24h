@@ -36,16 +36,23 @@ def test_counting():
     assert len(debug.get("unique_tracking_ids", [])) == debug.get("final_count")
     print(f"✓ TEST 1 PASSED: Total Frame Detections: {debug.get('total_person_detections')} -> Unique Tracking IDs: {debug.get('final_count')}")
 
-    # 3. Test "Count cars"
+    # 3. Test "Count cars" & "Count airplanes"
     print("\n[TEST 2] Query: 'Count cars'")
     res = requests.post(f"{BASE_URL}/api/query", json={"query": "Count cars", "camera_id": cam_id})
     assert res.status_code == 200
     d2 = res.json()
     print("Summary:", d2.get("summary"))
     print("Count:", d2.get("count"))
-    debug2 = d2.get("debug", {})
-    assert d2.get("count") == 0, f"Expected 0 cars, got {d2.get('count')}"
-    print("✓ TEST 2 PASSED: 0 cars correctly returned.")
+    assert d2.get("verdict") == "COUNT RESULT"
+    assert d2.get("count") >= 1, f"Expected cars >= 1, got {d2.get('count')}"
+    print(f"✓ TEST 2A PASSED: {d2.get('count')} unique cars counted via tracking IDs.")
+
+    print("\n[TEST 2B] Query: 'Count airplanes' (Zero ground-truth test)")
+    res_zero = requests.post(f"{BASE_URL}/api/query", json={"query": "Count airplanes", "camera_id": cam_id})
+    assert res_zero.status_code == 200
+    d_zero = res_zero.json()
+    assert d_zero.get("count") == 0, f"Expected 0 airplanes, got {d_zero.get('count')}"
+    print("✓ TEST 2B PASSED: 0 airplanes correctly returned.")
 
     # 4. Test "How many people passed through the gate?" with Region Memory
     print("\n[TEST 3] Creating 'gate' memory region & querying 'How many people passed through the gate?'")

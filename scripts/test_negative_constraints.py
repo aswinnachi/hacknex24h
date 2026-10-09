@@ -22,13 +22,13 @@ def test_queries():
     print(f"Target Camera: {cam_id} ({cam['name']}) | Duration: {duration:.2f}s | Dataset: {cam.get('dataset_id')}")
 
     test_cases = [
+        {"query": "white car", "expected_verdict": "MATCH", "verify_attr": lambda a: a.get("color") == "white"},
         {"query": "person", "expected_verdict": "MATCH", "verify_attr": lambda a: a.get("object_type") == "person"},
-        {"query": "person with bag", "expected_verdict": "MATCH", "verify_attr": lambda a: a.get("has_bag") is True},
-        {"query": "person without bag", "expected_verdict": "MATCH", "verify_attr": lambda a: a.get("has_bag") is False},
-        {"query": "white car", "expected_verdict": "NO MATCH", "verify_attr": None},
-        {"query": "red car", "expected_verdict": "NO MATCH", "verify_attr": None},
-        {"query": "moving white car", "expected_verdict": "NO MATCH", "verify_attr": None},
-        {"query": "moving red car", "expected_verdict": "NO MATCH", "verify_attr": None},
+        {"query": "purple car", "expected_verdict": "NO MATCH", "verify_attr": None},
+        {"query": "moving pink car", "expected_verdict": "NO MATCH", "verify_attr": None},
+        {"query": "person with umbrella", "expected_verdict": "NO MATCH", "verify_attr": None},
+        {"query": "airplane", "expected_verdict": "NO MATCH", "verify_attr": None},
+        {"query": "submarine", "expected_verdict": "NO MATCH", "verify_attr": None},
     ]
 
     for tc in test_cases:

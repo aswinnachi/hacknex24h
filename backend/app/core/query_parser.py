@@ -12,6 +12,7 @@ COLORS = [
 OBJECT_ALIASES = {
     "person": ["person", "people", "man", "woman", "human", "humans", "pedestrian", "someone", "individual", "guy", "lady"],
     "car": ["car", "cars", "automobile", "automobiles", "sedan", "suv"],
+    "auto": ["auto", "autos", "auto rickshaw", "auto-rickshaw", "autorickshaw", "rickshaw", "rickshaws", "tuk-tuk", "tuktuk", "three wheeler", "three-wheeler", "3 wheeler"],
     "bus": ["bus", "buses"],
     "truck": ["truck", "trucks", "pickup", "lorry"],
     "motorcycle": ["motorcycle", "motorcycles", "motorbike", "motorbikes", "moped", "scooter", "scooters", "scotter", "scooty", "twowheeler", "two wheeler", "two-wheeler"],
@@ -396,6 +397,20 @@ class QueryParser:
             for alias in aliases:
                 if re.search(rf"\b{re.escape(alias)}\b", text):
                     return standard_name
+                    
+        # Check if query references an open-vocabulary unknown entity (e.g. elephant, submarine, dog, cat)
+        ignore_words = set(STOP_WORDS) | set(COLORS) | {
+            "walking", "walks", "walked", "running", "runs", "ran", "jogging",
+            "riding", "rides", "cycling", "sitting", "sits", "seated",
+            "stopped", "parked", "stationary", "standing", "stands",
+            "moving", "motion", "passed", "passing", "driving", "entering", "entered", "exiting", "exited",
+            "with", "without", "carrying", "having", "wearing", "in", "at", "on", "from", "to", "by", "of",
+            "shirt", "pants", "tshirt", "t-shirt", "clothes", "clothing", "jacket", "dress", "jeans"
+        }
+        for w in text.split():
+            clean_w = re.sub(r"[^\w]", "", w.lower())
+            if clean_w and clean_w not in ignore_words and len(clean_w) > 2:
+                return clean_w
         return None
 
     def _extract_visual_concept(self, text: str, color: Optional[str], obj: Optional[str], sec_obj: Optional[str], original: str) -> str:

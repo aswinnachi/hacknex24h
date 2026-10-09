@@ -451,7 +451,7 @@ async function submitQuery(queryText) {
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
                 query: cleanQuery,
-                top_k: 3,
+                top_k: 16,
                 camera_id: reqCameraId
             })
         });
@@ -605,6 +605,63 @@ async function submitQuery(queryText) {
             const timeDisplay = topMatch.time_formatted || "3:56 PM";
             const camDisplay = (topMatch.camera || "CAM_01").toUpperCase();
 
+            // Build Multi-Clips Cards Gallery when multiple clips/objects match
+            let multiClipsHtml = "";
+            if (data.results.length > 1) {
+                const clipCards = data.results.map((resItem, idx) => {
+                    const isFirst = idx === 0;
+                    const rFrame = resItem.frame ? (resItem.frame.startsWith('/') ? resItem.frame : '/' + resItem.frame) : '';
+                    const rConcept = capitalize(resItem.concept || "object");
+                    const rTid = resItem.tracking_id ? `#${resItem.tracking_id}` : '';
+                    const rCam = (resItem.camera || "").toUpperCase();
+                    const rTime = resItem.time_formatted || `${resItem.timestamp.toFixed(1)}s`;
+                    const rAttr = resItem.attributes || {};
+                    const rCol = rAttr.color && rAttr.color !== "unknown" ? capitalize(rAttr.color) : "";
+                    const rSim = ((resItem.similarity || 0) * 100).toFixed(0);
+
+                    return `
+                        <div class="evidence-clip-card ${isFirst ? 'active-clip' : ''}" data-event-id="${resItem.event}" style="display:flex; flex-direction:column; background:rgba(15,23,42,0.85); border:1px solid ${isFirst ? 'var(--accent)' : 'rgba(255,255,255,0.12)'}; border-radius:6px; overflow:hidden; cursor:pointer; transition:all 0.2s ease;">
+                            <div style="position:relative; width:100%; height:75px; background:#000;">
+                                ${rFrame ? `<img src="${rFrame}" alt="Clip ${idx+1}" style="width:100%; height:100%; object-fit:cover;">` : ''}
+                                <div style="position:absolute; top:4px; left:4px; background:rgba(0,0,0,0.8); padding:2px 5px; border-radius:3px; font-size:0.65rem; font-family:var(--font-mono); color:#38bdf8; font-weight:700;">
+                                    📹 ${rCam}
+                                </div>
+                                <div style="position:absolute; bottom:4px; right:4px; background:rgba(0,0,0,0.85); padding:2px 5px; border-radius:3px; font-size:0.65rem; font-family:var(--font-mono); color:#fff;">
+                                    ⏱️ ${rTime}
+                                </div>
+                            </div>
+                            <div style="padding:6px 8px; font-size:0.75rem; display:flex; flex-direction:column; gap:2px;">
+                                <div style="display:flex; justify-content:space-between; align-items:center;">
+                                    <strong style="color:var(--text-primary); font-size:0.78rem;">${rConcept} ${rTid}</strong>
+                                    <span style="color:#10b981; font-weight:700; font-family:var(--font-mono); font-size:0.7rem;">${rSim}%</span>
+                                </div>
+                                <div style="color:var(--text-secondary); font-size:0.7rem; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">
+                                    ${rCol ? `${rCol} • ` : ''}${rAttr.is_moving ? 'Moving' : 'Stationary'}
+                                </div>
+                                <button class="btn-play-clip-item" data-event-id="${resItem.event}" style="margin-top:4px; padding:3px 6px; font-size:0.7rem; background:${isFirst ? 'var(--accent)' : 'rgba(255,255,255,0.08)'}; color:${isFirst ? '#0f172a' : 'var(--text-primary)'}; border:none; border-radius:3px; cursor:pointer; font-weight:600;">
+                                    ${isFirst ? '▶ Playing Now' : '▶ Play Clip'}
+                                </button>
+                            </div>
+                        </div>
+                    `;
+                }).join("");
+
+                multiClipsHtml = `
+                    <div style="margin-top:10px; padding-top:10px; border-top:1px solid rgba(255,255,255,0.12);">
+                        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                            <span style="font-weight:700; font-size:0.82rem; color:var(--text-primary); display:flex; align-items:center; gap:6px;">
+                                <span>🎞️ All Matching Clips Across Streams</span>
+                                <span style="background:var(--accent); color:#0f172a; padding:1px 6px; border-radius:10px; font-size:0.7rem; font-family:var(--font-mono); font-weight:700;">${data.results.length} Clips Found</span>
+                            </span>
+                            <span style="font-size:0.7rem; color:var(--text-muted);">Click any clip to play</span>
+                        </div>
+                        <div style="display:grid; grid-template-columns:repeat(auto-fill, minmax(130px, 1fr)); gap:8px;">
+                            ${clipCards}
+                        </div>
+                    </div>
+                `;
+            }
+
             const matchHtml = `
                 <div class="result-card grounded-evidence-card">
                     <div class="result-card-header">
@@ -633,6 +690,7 @@ async function submitQuery(queryText) {
                     <button class="btn-primary btn-load-evidence" data-event-id="${topMatch.event}" style="margin-top:6px; width:100%;">
                         ▶ View evidence frame / clip
                     </button>
+                    ${multiClipsHtml}
                     <details style="margin-top:8px; font-size:0.75rem; color:var(--text-secondary); background:rgba(0,0,0,0.25); padding:6px; border-radius:4px;">
                         <summary style="cursor:pointer; font-weight:600; color:var(--text-primary);">🔍 Developer Trace (Candidates: ${debug.candidates_checked ?? 1})</summary>
                         <div style="margin-top:6px; font-family:var(--font-mono); font-size:0.7rem; line-height:1.4;">
@@ -684,9 +742,22 @@ function appendChatMessage(sender, content, isHtml = false) {
     chatContainer.appendChild(bubble);
     chatContainer.scrollTop = chatContainer.scrollHeight;
 
-    bubble.querySelectorAll(".btn-load-evidence").forEach(btn => {
-        btn.addEventListener("click", () => {
-            loadEvidence(btn.dataset.eventId);
+    bubble.querySelectorAll(".btn-load-evidence, .btn-play-clip-item, .evidence-clip-card").forEach(el => {
+        el.addEventListener("click", (e) => {
+            const evId = el.dataset.eventId || (el.closest("[data-event-id]") && el.closest("[data-event-id]").dataset.eventId);
+            if (evId) {
+                bubble.querySelectorAll(".evidence-clip-card").forEach(c => {
+                    const isCur = c.dataset.eventId === evId;
+                    c.style.borderColor = isCur ? "var(--accent)" : "rgba(255,255,255,0.12)";
+                    const b = c.querySelector(".btn-play-clip-item");
+                    if (b) {
+                        b.textContent = isCur ? "▶ Playing Now" : "▶ Play Clip";
+                        b.style.background = isCur ? "var(--accent)" : "rgba(255,255,255,0.08)";
+                        b.style.color = isCur ? "#0f172a" : "var(--text-primary)";
+                    }
+                });
+                loadEvidence(evId);
+            }
         });
     });
 }
@@ -763,6 +834,14 @@ async function loadEvidence(eventId) {
                 object: evidence.concept, 
                 color: (evidence.color && evidence.color !== 'unknown') ? evidence.color : null 
             };
+        }
+
+        // Ensure evidence player isolates strictly the required target object
+        showAllSceneObjects = false;
+        const btnToggleAllBoxes = document.getElementById("btn-toggle-all-boxes");
+        if (btnToggleAllBoxes) {
+            btnToggleAllBoxes.textContent = "🎯 Target Only";
+            btnToggleAllBoxes.classList.remove("active");
         }
 
         // Update HUD
@@ -851,13 +930,13 @@ async function playFullVideo(cameraId = null) {
     videoEl.currentTime = 0;
     videoEl.play().catch(e => console.log("Play full video prevented:", e));
 
-    statusBadge.textContent = "FULL SOURCE STREAM";
+    statusBadge.textContent = "FULL SOURCE STREAM • ALL OBJECTS DETECTED";
     statusBadge.className = "badge live-badge";
 
-    hudVerdict.textContent = "FULL VIDEO";
-    hudVerdict.className = "verdict-tag";
-    const durSec = cam.duration ? Number(cam.duration).toFixed(1) : "98.0";
-    hudSummary.textContent = `Playing complete unclipped source CCTV feed for ${cam.name} (${targetCamId}) [0.0s → ${durSec}s].`;
+    hudVerdict.textContent = "ALL OBJECTS DETECTED";
+    hudVerdict.className = "verdict-tag yes";
+    const durSec = cam.duration ? Number(cam.duration).toFixed(1) : "10.0";
+    hudSummary.textContent = `Playing complete source CCTV feed for ${cam.name} (${targetCamId}) [0.0s → ${durSec}s] with real-time multi-object boundary tracking active for all objects in frame.`;
     hudCamera.textContent = `${cam.name} (${targetCamId})`;
     hudTimestamp.textContent = "FULL DURATION";
     hudOffset.textContent = `0.0s - ${durSec}s`;
@@ -867,7 +946,31 @@ async function playFullVideo(cameraId = null) {
     watermarkCam.textContent = `CAM: ${targetCamId.toUpperCase()}`;
     watermarkTime.textContent = `FULL VIDEO (0-${durSec}s)`;
 
-    stopEvidenceTracker();
+    // Load full dense scene trajectories to detect all objects in the frame
+    try {
+        const sceneRes = await fetch(`/api/cameras/${targetCamId}/scene`);
+        if (sceneRes.ok) {
+            const sceneData = await sceneRes.json();
+            showAllSceneObjects = true;
+            const btnToggleAllBoxes = document.getElementById("btn-toggle-all-boxes");
+            if (btnToggleAllBoxes) {
+                btnToggleAllBoxes.textContent = "👁️ All Objects: ON";
+                btnToggleAllBoxes.classList.add("active");
+            }
+            startEvidenceTracker({
+                scene_objects: sceneData.scene_objects || [],
+                video_width: sceneData.video_width || 848,
+                video_height: sceneData.video_height || 478,
+                duration: sceneData.duration || cam.duration || 10.0,
+                camera_id: targetCamId
+            });
+        } else {
+            stopEvidenceTracker();
+        }
+    } catch (e) {
+        console.warn("Could not load scene objects for full video:", e);
+        stopEvidenceTracker();
+    }
 }
 
 function clearEvidencePlayer(customMessage = null) {

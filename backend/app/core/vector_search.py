@@ -1,4 +1,5 @@
 import os
+os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 import json
 import numpy as np
 from typing import List, Dict, Any, Optional, Tuple
@@ -14,6 +15,36 @@ except ImportError:
 
 INDEX_PATH = "data/vector_index"
 os.makedirs(INDEX_PATH, exist_ok=True)
+
+COLOR_FAMILIES = {
+    "white": {"white", "silver", "light gray", "light grey", "cream", "pearl", "light"},
+    "silver": {"silver", "white", "gray", "grey", "light gray", "light grey"},
+    "gray": {"gray", "grey", "silver", "slate", "charcoal", "dark gray"},
+    "grey": {"gray", "grey", "silver", "slate", "charcoal", "dark gray"},
+    "black": {"black", "dark", "charcoal", "navy", "dark gray"},
+    "dark": {"black", "dark", "charcoal", "navy", "dark gray", "brown"},
+    "yellow": {"yellow", "gold", "golden", "amber", "mustard", "orange", "beige"},
+    "orange": {"orange", "yellow", "amber", "gold"},
+    "red": {"red", "maroon", "burgundy", "crimson", "ruby"},
+    "blue": {"blue", "navy", "teal", "cyan", "sky blue", "indigo"},
+    "green": {"green", "olive", "emerald", "lime"},
+    "brown": {"brown", "tan", "bronze", "beige"},
+}
+
+def are_colors_compatible(req_color: Optional[str], cand_color: Optional[str]) -> bool:
+    if not req_color or not cand_color or cand_color == "unknown":
+        return False
+    r = req_color.lower().strip()
+    c = cand_color.lower().strip()
+    if r == c or r in c or c in r:
+        return True
+    family = COLOR_FAMILIES.get(r, {r})
+    if c in family:
+        return True
+    for item in family:
+        if item in c or c in item:
+            return True
+    return False
 
 def validate_candidate_event(event_dict: Dict[str, Any], camera_id: Optional[str] = None) -> Tuple[bool, str]:
     """
@@ -105,29 +136,45 @@ def is_candidate_grounded(
         if c_lower in ("bag", "backpack", "suitcase", "handbag"):
             return False, "Candidate is a bag, but query requires without bag."
 
-    # 3. Exact Canonical Object Class Check (PART 1 FIX)
+    cand_is_auto = (c_lower in ("auto", "auto rickshaw", "autorickshaw", "three wheeler") or attributes.get("is_auto") is True or attributes.get("vehicle_type") == "auto")
+
+    # 3. Exact Canonical Object Class Check (Strict Separation for Auto, Flexible Vehicle Grounding)
     if required_object:
         req_obj = required_object.lower()
-        if req_obj in ("car", "automobile", "sedan", "suv"):
-            if c_lower not in ("car", "automobile", "sedan", "suv"):
+        if req_obj in ("auto", "auto rickshaw", "autorickshaw", "auto-rickshaw", "tuk tuk", "three wheeler", "3 wheeler"):
+            if not cand_is_auto:
+                return False, f"Candidate is a {c_lower}, not an auto-rickshaw."
+        elif req_obj in ("car", "automobile", "sedan", "suv", "van"):
+            if cand_is_auto:
+                return False, "Candidate is an auto-rickshaw, not a car."
+            # In surveillance feeds, passenger cars, delivery vans, and light commercial vehicles (tempos/trucks) are all 4-wheel vehicles
+            if c_lower not in ("car", "automobile", "sedan", "suv", "van", "vehicle", "truck"):
                 return False, f"Candidate is a {c_lower}, not a car."
         elif req_obj in ("bus", "buses"):
+            if cand_is_auto:
+                return False, "Candidate is an auto-rickshaw, not a bus."
             if c_lower not in ("bus", "buses"):
                 return False, f"Candidate is a {c_lower}, not a bus."
         elif req_obj in ("truck", "trucks", "lorry", "pickup"):
-            if c_lower not in ("truck", "trucks", "lorry", "pickup"):
+            if cand_is_auto:
+                return False, "Candidate is an auto-rickshaw, not a truck."
+            if c_lower not in ("truck", "trucks", "lorry", "pickup", "van"):
                 return False, f"Candidate is a {c_lower}, not a truck."
         elif req_obj in ("motorcycle", "motorbike", "moped", "scooter", "scooters", "scotter", "scooty", "twowheeler", "two wheeler", "two-wheeler"):
+            if cand_is_auto:
+                return False, "Candidate is an auto-rickshaw, not a motorcycle."
             if c_lower not in ("motorcycle", "motorbike", "moped", "scooter"):
                 return False, f"Candidate is a {c_lower}, not a motorcycle."
         elif req_obj in ("bicycle", "bike", "cycle", "bicycles", "bikes"):
+            if cand_is_auto:
+                return False, "Candidate is an auto-rickshaw, not a bicycle."
             if c_lower not in ("bicycle", "bike", "cycle", "bicycles", "bikes"):
                 return False, f"Candidate is a {c_lower}, not a bicycle."
         elif req_obj in ("person", "people", "man", "woman", "human", "pedestrian"):
             if c_lower != "person":
                 return False, f"Candidate is a {c_lower}, not a person."
         elif req_obj in ("vehicle", "vehicles", "transport"):
-            if c_lower not in ("car", "bus", "truck", "motorcycle", "bicycle", "vehicle", "white vehicle"):
+            if not cand_is_auto and c_lower not in ("car", "bus", "truck", "motorcycle", "bicycle", "vehicle", "white vehicle"):
                 return False, f"Candidate is a {c_lower}, not a vehicle."
         elif req_obj in ("backpack", "pack"):
             if c_lower not in ("backpack", "pack") and not attributes.get("has_backpack"):
@@ -157,17 +204,17 @@ def is_candidate_grounded(
     req_col = (required_upper_color or required_color or "").lower()
     if req_col:
         matched_color = False
-        if c_lower == "person":
-            if upper_color != "unknown" and upper_color == req_col:
+        if cand_is_auto:
+            # Auto-rickshaws frequently have two-tone yellow top and green/black body
+            if req_col in ("green", "yellow", "black") and (req_col in attr_color or "green and yellow" in attr_color):
                 matched_color = True
-            elif attr_color != "unknown" and attr_color == req_col:
+            elif are_colors_compatible(req_col, attr_color) or are_colors_compatible(req_col, attributes.get("vehicle_color", "")):
                 matched_color = True
-            elif req_col in ("black", "dark") and (upper_color in ("black", "dark") or attr_color in ("black", "dark")):
+        elif c_lower == "person":
+            if are_colors_compatible(req_col, upper_color) or are_colors_compatible(req_col, attr_color):
                 matched_color = True
         else:
-            if attr_color != "unknown" and attr_color == req_col:
-                matched_color = True
-            elif req_col in ("black", "dark") and attr_color in ("black", "dark"):
+            if are_colors_compatible(req_col, attr_color) or are_colors_compatible(req_col, attributes.get("vehicle_color", "")):
                 matched_color = True
         
         if not matched_color:
@@ -177,9 +224,8 @@ def is_candidate_grounded(
     # 5. Strict Lower Clothing Color Verification
     if required_lower_color:
         req_lcol = required_lower_color.lower()
-        if lower_color != "unknown" and lower_color != req_lcol:
-            if not (req_lcol in ("black", "dark") and lower_color in ("black", "dark")):
-                return False, f"Lower clothing color verified as '{lower_color}', not requested '{req_lcol}'."
+        if lower_color != "unknown" and not are_colors_compatible(req_lcol, lower_color):
+            return False, f"Lower clothing color verified as '{lower_color}', not requested '{req_lcol}'."
 
     # 6. Specific Accessory Verification (e.g. backpack, handbag, umbrella, phone, bottle)
     if required_accessories:
@@ -529,6 +575,12 @@ class VectorSearch:
             upper_conf = float(attrs.get("upper_color_conf") or 0.0) if required_upper_color else 0.0
             rank_score = (r["similarity"] * 0.35) + (max(color_conf, upper_conf) * 0.65)
 
+            # Exact concept match boost (e.g. if user asks for car, true car ranks above truck)
+            if required_object and row_dict["concept"].lower() == required_object.lower():
+                rank_score += 1.0
+            if required_action == "moving" and attrs.get("is_moving"):
+                rank_score += 0.4
+
             from backend.app.core.evidence import format_time_12h
             cand_item = {
                 "event": event_id,
@@ -547,12 +599,29 @@ class VectorSearch:
             detailed_results.append(cand_item)
             accepted_candidates.append(f"Track #{row_dict.get('tracking_id')} at {row_dict['start_timestamp']:.2f}s ({row_dict['concept']})")
             
-            if len(detailed_results) >= top_k * 3:
+            if len(detailed_results) >= max(top_k * 5, 50):
                 break
 
         # Prioritize candidates with highest verified attribute confidence
         detailed_results.sort(key=lambda x: x.get("_rank_score", 0), reverse=True)
-        final_results = detailed_results[:top_k]
+
+        # Deduplicate by unique (camera, tracking_id) so all distinct vehicle tracks appear in results
+        unique_results = []
+        seen_tracks = set()
+        for item in detailed_results:
+            trk_key = (item["camera"], str(item.get("tracking_id", "")))
+            if trk_key not in seen_tracks or not item.get("tracking_id"):
+                seen_tracks.add(trk_key)
+                unique_results.append(item)
+
+        if len(unique_results) < top_k:
+            for item in detailed_results:
+                if item not in unique_results:
+                    unique_results.append(item)
+                if len(unique_results) >= top_k:
+                    break
+
+        final_results = unique_results[:top_k]
         for item in final_results:
             item.pop("_rank_score", None)
 
