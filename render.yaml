@@ -19,3 +19,7 @@ services:
         value: "250.0"
       - key: CORS_ORIGINS
         value: "https://ai-vision-security-frontend.vercel.app,https://*.vercel.app,http://localhost:3000"
+      - key: ENABLE_EMBEDDING_WARMUP
+        value: "false"
+      - key: AUTO_CONNECT_CAMERAS
+        value: "false"

@@ -35,11 +35,13 @@ app = FastAPI(
 
 @app.on_event("startup")
 def startup_warmup():
-    try:
-        from backend.app.core.embeddings import get_embedder
-        get_embedder()
-    except Exception as e:
-        logger.warning(f"Embedding warmup warning: {e}")
+    # Only load embedder if explicitly requested to prevent OOM on 512MB RAM tiers
+    if os.environ.get("ENABLE_EMBEDDING_WARMUP", "false").lower() == "true":
+        try:
+            from backend.app.core.embeddings import get_embedder
+            get_embedder()
+        except Exception as e:
+            logger.warning(f"Embedding warmup warning: {e}")
 
     try:
         from backend.app.core.video_lab import get_job_queue
@@ -48,45 +50,46 @@ def startup_warmup():
     except Exception as e:
         logger.warning(f"VideoLab queue recovery warning: {e}")
 
-    def _auto_connect_live_streams():
-        import time
+    # Auto-connect camera streams only if explicitly enabled (prevents multi-camera memory exhaustion on free tier)
+    if os.environ.get("AUTO_CONNECT_CAMERAS", "false").lower() == "true":
+        def _auto_connect_live_streams():
+            import time
+            import threading
+            time.sleep(2.0)
+            try:
+                from backend.app.db.database import execute_query
+                from backend.app.core.stream_manager import get_stream_manager
+                mgr = get_stream_manager()
+                rows = execute_query(
+                    "SELECT id, name, video_path, source_type FROM cameras WHERE source_type IN ('live', 'youtube_live') ORDER BY created_at DESC",
+                    fetch=True
+                )
+                def _connect_worker(row_dict):
+                    try:
+                        c_id = row_dict["id"]
+                        existing = mgr.get_stream(c_id)
+                        if not (existing and existing.is_connected):
+                            mgr.connect_camera(
+                                camera_id=c_id,
+                                name=row_dict.get("name") or c_id,
+                                stream_url=row_dict["video_path"],
+                                source_type=row_dict.get("source_type", "youtube_live"),
+                                timeout=25.0,
+                                record_stream=False
+                            )
+                    except Exception as stream_err:
+                        logger.warning(f"[AutoConnect] Error starting stream {row_dict.get('id')}: {stream_err}")
+
+                threads = []
+                for r in (rows or [])[:2]:
+                    t = threading.Thread(target=_connect_worker, args=(dict(r),), daemon=True)
+                    t.start()
+                    threads.append(t)
+            except Exception as startup_err:
+                logger.warning(f"[AutoConnect] Startup stream initialization error: {startup_err}")
+
         import threading
-        time.sleep(2.0)
-        try:
-            from backend.app.db.database import execute_query
-            from backend.app.core.stream_manager import get_stream_manager
-            mgr = get_stream_manager()
-            rows = execute_query(
-                "SELECT id, name, video_path, source_type FROM cameras WHERE source_type IN ('live', 'youtube_live') ORDER BY created_at DESC",
-                fetch=True
-            )
-            # Concurrently initialize the top 4 visible cameras for instant matrix tracking
-            def _connect_worker(row_dict):
-                try:
-                    c_id = row_dict["id"]
-                    existing = mgr.get_stream(c_id)
-                    if not (existing and existing.is_connected):
-                        mgr.connect_camera(
-                            camera_id=c_id,
-                            name=row_dict.get("name") or c_id,
-                            stream_url=row_dict["video_path"],
-                            source_type=row_dict.get("source_type", "youtube_live"),
-                            timeout=25.0,
-                            record_stream=False
-                        )
-                except Exception as stream_err:
-                    logger.warning(f"[AutoConnect] Error starting stream {row_dict.get('id')}: {stream_err}")
-
-            threads = []
-            for r in (rows or [])[:4]:
-                t = threading.Thread(target=_connect_worker, args=(dict(r),), daemon=True)
-                t.start()
-                threads.append(t)
-        except Exception as startup_err:
-            logger.warning(f"[AutoConnect] Startup stream initialization error: {startup_err}")
-
-    import threading
-    threading.Thread(target=_auto_connect_live_streams, daemon=True, name="AutoConnectStartup").start()
+        threading.Thread(target=_auto_connect_live_streams, daemon=True, name="AutoConnectStartup").start()
 
 
 
