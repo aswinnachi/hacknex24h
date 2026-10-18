@@ -1,22 +1,21 @@
 services:
   - type: web
     name: ai-vision-security-backend
-    env: docker
+    runtime: docker
     dockerfilePath: ./Dockerfile
     region: oregon
-    plan: standard
-    disk:
-      name: ai-vision-data
-      mountPath: /data
-      sizeGB: 20
+    plan: free
+    healthCheckPath: /api/health
     envVars:
       - key: APP_ENV
         value: production
       - key: APP_DEBUG
         value: false
       - key: DATABASE_URL
-        value: sqlite:////data/app.db
+        value: sqlite:////tmp/app.db
       - key: STORAGE_LOCAL_DIR
-        value: /data/storage
+        value: /tmp/storage
       - key: MAX_UPLOAD_SIZE_MB
         value: "250.0"
+      - key: CORS_ORIGINS
+        value: "https://ai-vision-security-frontend.vercel.app,https://*.vercel.app,http://localhost:3000"
