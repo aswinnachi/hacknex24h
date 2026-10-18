@@ -35,6 +35,12 @@ app = FastAPI(
 
 @app.on_event("startup")
 def startup_warmup():
+    try:
+        from backend.app.db.init_db import init_db
+        init_db()
+    except Exception as e:
+        logger.warning(f"Database initialization warning: {e}")
+
     # Only load embedder if explicitly requested to prevent OOM on 512MB RAM tiers
     if os.environ.get("ENABLE_EMBEDDING_WARMUP", "false").lower() == "true":
         try:
