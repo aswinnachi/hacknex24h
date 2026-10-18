@@ -1,5 +1,18 @@
 // Multi-Stream Video Intelligence — Frontend Application Logic
 
+// Dynamic Cloud / Vercel API Base URL Resolution
+const API_BASE_URL = (typeof window !== "undefined" && window.API_BASE_URL) ? window.API_BASE_URL.replace(/\/$/, "") : "";
+if (typeof window !== "undefined" && API_BASE_URL) {
+    const _nativeFetch = window.fetch;
+    window.fetch = function(input, init) {
+        if (typeof input === "string" && (input.startsWith("/api/") || input.startsWith("/data/"))) {
+            input = API_BASE_URL + input;
+        }
+        return _nativeFetch(input, init);
+    };
+    console.info("[Frontend] Configured remote backend API_BASE_URL:", API_BASE_URL);
+}
+
 let allCameras = [];
 let allEvents = [];
 let allMemories = [];
@@ -8,6 +21,19 @@ let globalScope = "current"; // "current" | "all"
 let currentEvidenceData = null;
 let lastPendingQuery = null;
 let autoRefreshTimer = null;
+let cameraPlayerModes = {}; // camId -> "ai" | "direct"
+let multiviewDirectYoutube = true;
+let showBoundingBoxes = true;
+let latestMatrixDetections = {};
+let liveMatrixPollTimer = null;
+
+function extractYouTubeVideoId(url) {
+    if (!url || typeof url !== "string") return null;
+    const u = url.trim();
+    const regExp = /(?:youtube\.com\/(?:watch\?.*v=|live\/|embed\/)|youtu\.be\/)([a-zA-Z0-9_-]{6,15})/i;
+    const match = u.match(regExp);
+    return (match && match[1]) ? match[1] : null;
+}
 
 document.addEventListener("DOMContentLoaded", () => {
     initApp();
@@ -21,6 +47,14 @@ async function initApp() {
     setupEventListeners();
     setupUploadHandlers();
     setupResetHandlers();
+    setupConnectCameraHandlers();
+    setupTimelineFilterHandlers();
+    setupAlertingHandlers();
+    startAlertsPolling();
+    startLiveMatrixDetectionPolling();
+    setupGlobalModalAndKeyHandlers();
+    setupLayoutInteractions();
+    setupVideoLabHandlers();
 }
 
 // ==========================================
@@ -102,16 +136,61 @@ async function loadCameras() {
             filterContainer.innerHTML = `<button class="filter-btn ${globalScope === 'all' ? 'active' : ''}" data-cam-filter="all">All Feeds</button>`;
         }
 
+        const timelineCamSelect = document.getElementById("timeline-cam-select");
+        if (timelineCamSelect) {
+            const currentSelected = timelineCamSelect.value;
+            timelineCamSelect.innerHTML = `<option value="all">All Cameras</option>`;
+            allCameras.forEach(cam => {
+                const opt = document.createElement("option");
+                opt.value = cam.id;
+                opt.textContent = `${cam.name} (${cam.id})`;
+                timelineCamSelect.appendChild(opt);
+            });
+            if (currentSelected && Array.from(timelineCamSelect.options).some(o => o.value === currentSelected)) {
+                timelineCamSelect.value = currentSelected;
+            }
+        }
+
         let hasAnalyzingCamera = false;
 
         allCameras.forEach(cam => {
             const isSelected = cam.id === activeCameraId;
             const isAnalyzing = cam.status === "ANALYZING";
+            const isLive = cam.source_type === "live" || cam.source_type === "youtube_live";
+            const isYt = cam.source_type === "youtube_live";
+            const isConnected = cam.status === "CONNECTED";
             if (isAnalyzing) hasAnalyzingCamera = true;
 
-            const statusBadge = isAnalyzing 
-                ? `<span class="count-badge" style="color:var(--status-warning); border-color:var(--status-warning);">Analyzing</span>` 
-                : `<span class="count-badge">${cam.id}</span>`;
+            let statusBadge = "";
+            if (isYt) {
+                if (isConnected) {
+                    statusBadge = `<span class="count-badge live-badge" style="color:#ef4444; border-color:#ef4444; font-weight:700;">● YT LIVE</span>`;
+                } else {
+                    statusBadge = `<span class="count-badge" style="color:#f87171; border-color:#f87171;">OFFLINE</span>`;
+                }
+            } else if (isLive) {
+                if (isConnected) {
+                    statusBadge = `<span class="count-badge live-badge" style="color:#34d399; border-color:#34d399; font-weight:700;">● LIVE</span>`;
+                } else {
+                    statusBadge = `<span class="count-badge" style="color:#f87171; border-color:#f87171;">OFFLINE</span>`;
+                }
+            } else if (isAnalyzing) {
+                statusBadge = `<span class="count-badge" style="color:var(--status-warning); border-color:var(--status-warning);">Analyzing</span>`;
+            } else {
+                statusBadge = `<span class="count-badge" style="font-size:0.65rem;">UPLOADED</span>`;
+            }
+
+            const disconnectBtnHtml = (isLive && isConnected) ? `
+                <button class="btn-disc-cam" title="Disconnect stream" data-cam-id="${cam.id}" style="background:transparent; border:none; color:#f87171; cursor:pointer; padding:2px; display:inline-flex; align-items:center;">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18.36 6.64a9 9 0 1 1-12.73 0"/><line x1="12" y1="2" x2="12" y2="12"/></svg>
+                </button>
+            ` : "";
+
+            const reconnectBtnHtml = (isLive && !isConnected) ? `
+                <button class="btn-reconnect-cam" title="Connect/reconnect live stream" data-cam-id="${cam.id}">
+                    ⚡ Connect
+                </button>
+            ` : "";
 
             // Left Panel Camera Card with Delete action
             const card = document.createElement("div");
@@ -119,9 +198,11 @@ async function loadCameras() {
             card.dataset.camId = cam.id;
             card.innerHTML = `
                 <div class="cam-header">
-                    <span style="font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:160px;" title="${escapeHtml(cam.name)}">${escapeHtml(cam.name)}</span>
+                    <span style="font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:140px;" title="${escapeHtml(cam.name)}">${escapeHtml(cam.name)}</span>
                     <div class="cam-actions">
                         ${statusBadge}
+                        ${disconnectBtnHtml}
+                        ${reconnectBtnHtml}
                         <button class="btn-del-cam" title="Delete camera & video data" data-cam-id="${cam.id}">
                             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg>
                         </button>
@@ -129,20 +210,46 @@ async function loadCameras() {
                 </div>
                 <div class="cam-meta">
                     <span>${cam.resolution || "768x432"} • ${cam.fps ? cam.fps.toFixed(0) : 12} FPS</span>
-                    <span>${cam.duration ? cam.duration.toFixed(1) + "s" : ""}</span>
+                    <span>${isYt ? "YOUTUBE LIVE" : (isLive ? "LIVE FEED" : (cam.duration ? cam.duration.toFixed(1) + "s" : ""))}</span>
                 </div>
             `;
 
             // Select camera click
             card.addEventListener("click", (e) => {
-                if (e.target.closest(".btn-del-cam")) return;
+                if (e.target.closest(".btn-del-cam") || e.target.closest(".btn-disc-cam") || e.target.closest(".btn-reconnect-cam")) return;
                 document.querySelectorAll(".camera-card").forEach(c => c.classList.remove("active"));
                 card.classList.add("active");
                 activeCameraId = cam.id;
-                loadVideoAnalysisSummary(cam.id);
+                const isLive = cam.source_type === "live" || cam.source_type === "youtube_live" || Boolean(extractYouTubeVideoId(cam.video_path));
+                if (isLive) {
+                    displayLiveCamera(cam.id);
+                } else {
+                    stopLiveCameraStream();
+                    loadVideoAnalysisSummary(cam.id);
+                }
                 renderTimelineCards();
                 updateEventsCounter();
             });
+
+            // Disconnect camera button
+            const discBtn = card.querySelector(".btn-disc-cam");
+            if (discBtn) {
+                discBtn.addEventListener("click", async (e) => {
+                    e.stopPropagation();
+                    if (confirm(`Disconnect live camera stream "${cam.name}" (${cam.id})?`)) {
+                        await disconnectCamera(cam.id);
+                    }
+                });
+            }
+
+            // Reconnect camera button
+            const reconBtn = card.querySelector(".btn-reconnect-cam");
+            if (reconBtn) {
+                reconBtn.addEventListener("click", async (e) => {
+                    e.stopPropagation();
+                    await reconnectCamera(cam);
+                });
+            }
 
             // Delete camera button
             const delBtn = card.querySelector(".btn-del-cam");
@@ -180,9 +287,15 @@ async function loadCameras() {
             }
         });
 
-        // Load summary for active camera
+        // Load live stream or video analysis summary for active camera
         if (activeCameraId) {
-            await loadVideoAnalysisSummary(activeCameraId);
+            const activeCam = allCameras.find(c => c.id === activeCameraId);
+            const isLive = activeCam && (activeCam.source_type === "live" || activeCam.source_type === "youtube_live" || Boolean(extractYouTubeVideoId(activeCam.video_path)));
+            if (isLive) {
+                displayLiveCamera(activeCameraId);
+            } else {
+                await loadVideoAnalysisSummary(activeCameraId);
+            }
         }
 
         // If a camera is currently analyzing in background, schedule a background refresh
@@ -542,6 +655,49 @@ async function submitQuery(queryText) {
             return;
         }
 
+        // Case Cross-Camera
+        if (verdict === "CROSS_CAMERA") {
+            const debug = data.debug || {};
+            const e1 = data.results[0] || {};
+            const e2 = data.results[1] || {};
+            const e1Frame = e1.frame ? (e1.frame.startsWith('/') ? e1.frame : '/' + e1.frame) : '';
+            const e2Frame = e2.frame ? (e2.frame.startsWith('/') ? e2.frame : '/' + e2.frame) : '';
+            const e1Cam = (e1.camera || "CAM 1").toUpperCase();
+            const e2Cam = (e2.camera || "CAM 2").toUpperCase();
+            const e1Time = e1.time_formatted || (e1.timestamp ? `${e1.timestamp.toFixed(1)}s` : '');
+            const e2Time = e2.time_formatted || (e2.timestamp ? `${e2.timestamp.toFixed(1)}s` : '');
+
+            const crossHtml = `
+                <div class="result-card" style="border-left: 3px solid #38bdf8;">
+                    <div class="result-card-header">
+                        <span class="verdict-tag" style="background:rgba(56,189,248,0.18); color:#38bdf8; border:1px solid #38bdf8; font-weight:700;">CROSS-CAMERA MATCH</span>
+                        <span class="font-mono">Confidence: ${(debug.confidence ? (debug.confidence * 100).toFixed(0) : 85)}%</span>
+                    </div>
+                    <p><strong>${escapeHtml(summary)}</strong></p>
+                    <div style="display:grid; grid-template-columns: 1fr 1fr; gap:8px; margin-top:10px;">
+                        <div style="background:rgba(0,0,0,0.35); border-radius:6px; overflow:hidden; border:1px solid rgba(255,255,255,0.08); padding:6px; cursor:pointer;" onclick="loadEvidence('${e1.event}')">
+                            <div style="font-size:0.7rem; font-weight:700; color:#38bdf8; margin-bottom:4px;">📹 ${e1Cam} • ${e1Time}</div>
+                            ${e1Frame ? `<img src="${e1Frame}" style="width:100%; height:90px; object-fit:cover; border-radius:4px;">` : '<div style="height:90px; display:flex; align-items:center; justify-content:center; color:var(--text-muted); font-size:0.7rem;">Frame</div>'}
+                            <div style="font-size:0.68rem; color:var(--text-secondary); margin-top:4px;">Track #${e1.tracking_id || '--'} • ${capitalize(e1.concept || '')}</div>
+                        </div>
+                        <div style="background:rgba(0,0,0,0.35); border-radius:6px; overflow:hidden; border:1px solid rgba(255,255,255,0.08); padding:6px; cursor:pointer;" onclick="loadEvidence('${e2.event}')">
+                            <div style="font-size:0.7rem; font-weight:700; color:#a855f7; margin-bottom:4px;">📹 ${e2Cam} • ${e2Time}</div>
+                            ${e2Frame ? `<img src="${e2Frame}" style="width:100%; height:90px; object-fit:cover; border-radius:4px;">` : '<div style="height:90px; display:flex; align-items:center; justify-content:center; color:var(--text-muted); font-size:0.7rem;">Frame</div>'}
+                            <div style="font-size:0.68rem; color:var(--text-secondary); margin-top:4px;">Track #${e2.tracking_id || '--'} • ${capitalize(e2.concept || '')}</div>
+                        </div>
+                    </div>
+                    <div style="font-size:0.7rem; color:var(--text-muted); margin-top:8px; line-height:1.3; border-top:1px solid rgba(255,255,255,0.08); padding-top:6px;">
+                        ⏱️ Time Delta: <strong>${debug.time_delta_seconds ?? '--'}s</strong> • ${escapeHtml(debug.uncertainty_note || '')}
+                    </div>
+                </div>
+            `;
+            appendChatMessage("assistant", crossHtml, true);
+            if (data.results && data.results.length > 0) {
+                await loadEvidence(data.results[0].event);
+            }
+            return;
+        }
+
         // Case D: NO MATCH / NO
         if (verdict === "NO MATCH" || verdict === "NO") {
             const debug = data.debug || {};
@@ -807,6 +963,7 @@ function hideClarificationCard() {
 // ==========================================
 async function loadEvidence(eventId) {
     if (!eventId) return;
+    stopLiveCameraStream();
 
     const videoEl = document.getElementById("evidence-video");
     const frameImg = document.getElementById("evidence-frame-img");
@@ -900,6 +1057,7 @@ async function loadEvidence(eventId) {
 }
 
 async function playFullVideo(cameraId = null) {
+    stopLiveCameraStream();
     const targetCamId = cameraId || activeCameraId || (allCameras[0] ? allCameras[0].id : null);
     if (!targetCamId) {
         alert("No active camera selected.");
@@ -974,6 +1132,7 @@ async function playFullVideo(cameraId = null) {
 }
 
 function clearEvidencePlayer(customMessage = null) {
+    stopLiveCameraStream();
     const videoEl = document.getElementById("evidence-video");
     const frameImg = document.getElementById("evidence-frame-img");
     const statusBadge = document.getElementById("player-status-badge");
@@ -1474,73 +1633,120 @@ function drawBoundingBoxes(bboxes) {
 }
 
 // ==========================================
-// 6. BOTTOM EVENT TIMELINE
+// 6. BOTTOM EVENT TIMELINE & SEARCHABLE HISTORY
 // ==========================================
 async function loadEventTimeline() {
     const trackEl = document.getElementById("timeline-track");
+    const countBadge = document.getElementById("timeline-count-badge");
+    const scopeBadge = document.getElementById("timeline-scope-badge");
+    
+    const camSelect = document.getElementById("timeline-cam-select");
+    const sourceSelect = document.getElementById("timeline-source-select");
+    const classSelect = document.getElementById("timeline-class-select");
+    const timeSelect = document.getElementById("timeline-time-select");
+    const trackInput = document.getElementById("timeline-track-input");
+
+    const camVal = (camSelect && camSelect.value) ? camSelect.value : "all";
+    const sourceVal = (sourceSelect && sourceSelect.value) ? sourceSelect.value : "all";
+    const classVal = (classSelect && classSelect.value) ? classSelect.value : "all";
+    const trackVal = (trackInput && trackInput.value.trim()) ? trackInput.value.trim().replace(/^#/, "") : "";
+    const timeVal = (timeSelect && timeSelect.value) ? timeSelect.value : "all";
+
+    let startTime = null;
+    if (timeVal !== "all") {
+        const nowSec = Date.now() / 1000;
+        if (timeVal === "5m") startTime = nowSec - 300;
+        else if (timeVal === "15m") startTime = nowSec - 900;
+        else if (timeVal === "1h") startTime = nowSec - 3600;
+        else if (timeVal === "24h") startTime = nowSec - 86400;
+    }
+
+    const params = new URLSearchParams();
+    params.set("limit", "150");
+    if (camVal !== "all") params.set("camera_id", camVal);
+    if (sourceVal !== "all") params.set("source_type", sourceVal);
+    if (classVal !== "all") params.set("concept", classVal);
+    if (trackVal) params.set("tracking_id", trackVal);
+    if (startTime !== null) params.set("start_time", startTime.toString());
 
     try {
-        const res = await fetch("/api/events");
+        const res = await fetch(`/api/events?${params.toString()}`);
         if (!res.ok) throw new Error("Failed to load events");
         allEvents = await res.json();
 
-        updateEventsCounter();
+        if (countBadge) {
+            countBadge.textContent = `${allEvents.length} Event${allEvents.length === 1 ? '' : 's'}`;
+        }
+        if (scopeBadge) {
+            if (camVal !== "all") {
+                const cObj = allCameras.find(c => c.id === camVal);
+                scopeBadge.textContent = cObj ? cObj.name : camVal;
+            } else if (sourceVal !== "all") {
+                scopeBadge.textContent = sourceVal === "youtube_live" ? "YouTube Live" : sourceVal.toUpperCase();
+            } else {
+                scopeBadge.textContent = "All Feeds";
+            }
+        }
+
         renderTimelineCards();
-
-
     } catch (err) {
         trackEl.innerHTML = `<div class="empty-state">No active event timeline.</div>`;
     }
 }
 
-function getFilteredEvents() {
-    if (globalScope === "all") {
-        return allEvents;
-    }
-    if (!activeCameraId) return [];
-    return allEvents.filter(ev => ev.camera_id === activeCameraId);
-}
-
 function updateEventsCounter() {
+    const countBadge = document.getElementById("timeline-count-badge");
+    if (countBadge) {
+        countBadge.textContent = `${allEvents.length} Event${allEvents.length === 1 ? '' : 's'}`;
+    }
     const countEl = document.getElementById("indexed-events-count");
-    const filtered = getFilteredEvents();
-    if (globalScope === "all") {
-        countEl.textContent = `Events: ${allEvents.length} (All Feeds)`;
-    } else {
-        const camLabel = activeCameraId || "None";
-        countEl.textContent = `Events: ${filtered.length} (${camLabel})`;
+    if (countEl) {
+        countEl.textContent = `Events: ${allEvents.length} (Indexed)`;
     }
 }
 
 function renderTimelineCards() {
     const trackEl = document.getElementById("timeline-track");
-    const scopeBadge = document.getElementById("timeline-scope-badge");
+    if (!trackEl) return;
     trackEl.innerHTML = "";
 
-    const filtered = getFilteredEvents();
-    if (scopeBadge) {
-        scopeBadge.textContent = globalScope === "all" ? "All Registered Feeds" : (activeCameraId || "No Feed");
-    }
-
-    if (filtered.length === 0) {
-        trackEl.innerHTML = `<div class="empty-state">No events recorded for ${globalScope === 'all' ? 'any camera' : (activeCameraId || 'selected camera')}.</div>`;
+    if (!allEvents || allEvents.length === 0) {
+        trackEl.innerHTML = `<div class="empty-state">No matching events found for current filters.</div>`;
         return;
     }
 
-    filtered.forEach(ev => {
+    allEvents.forEach(ev => {
         const card = document.createElement("div");
-        card.className = "timeline-card";
+        const isLive = ev.source_type === "live" || ev.source_type === "youtube_live";
+        const isYt = ev.source_type === "youtube_live";
+        card.className = `timeline-card ${isLive ? 'live-event' : ''}`;
         card.dataset.eventId = ev.id;
         
         const frameSrc = ev.representative_frame ? `/${ev.representative_frame}` : "";
-        const confPct = ev.confidence ? (ev.confidence * 100).toFixed(0) + "%" : "";
+        const confPct = ev.confidence ? `${Math.round(ev.confidence * 100)}%` : "";
+        
+        let timeDisplay = "";
+        if (isLive && ev.start_timestamp > 1000000000) {
+            timeDisplay = new Date(ev.start_timestamp * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+        } else {
+            timeDisplay = `${ev.start_timestamp.toFixed(1)}s`;
+        }
+
+        const tidStr = ev.tracking_id ? ` #${ev.tracking_id}` : "";
+        let liveBadge = "";
+        if (isYt) {
+            liveBadge = `<span class="timeline-badge-live" style="background:rgba(239,68,68,0.2); color:#ef4444; border:1px solid #ef4444;">● YT</span>`;
+        } else if (isLive) {
+            liveBadge = `<span class="timeline-badge-live">● LIVE</span>`;
+        }
+        const camLabel = ev.camera_name || ev.camera_id;
 
         card.innerHTML = `
             <img class="timeline-thumb" src="${frameSrc}" alt="${escapeHtml(ev.concept)}" onerror="this.style.display='none'" />
             <div class="timeline-info">
-                <span class="timeline-concept">${capitalize(ev.concept)}</span>
-                <span class="timeline-time">${ev.start_timestamp.toFixed(2)}s • ${confPct}</span>
-                <span class="timeline-cam">${ev.camera_id}</span>
+                <span class="timeline-concept">${capitalize(ev.concept)}${tidStr}${liveBadge}</span>
+                <span class="timeline-time">${timeDisplay} • ${confPct}</span>
+                <span class="timeline-cam" title="${escapeHtml(camLabel)}">${escapeHtml(camLabel)}</span>
             </div>
         `;
 
@@ -1552,6 +1758,38 @@ function renderTimelineCards() {
 
         trackEl.appendChild(card);
     });
+}
+
+function setupTimelineFilterHandlers() {
+    const camSelect = document.getElementById("timeline-cam-select");
+    const sourceSelect = document.getElementById("timeline-source-select");
+    const classSelect = document.getElementById("timeline-class-select");
+    const timeSelect = document.getElementById("timeline-time-select");
+    const trackInput = document.getElementById("timeline-track-input");
+    const refreshBtn = document.getElementById("btn-refresh-timeline");
+
+    if (camSelect) {
+        camSelect.addEventListener("change", () => loadEventTimeline());
+    }
+    if (sourceSelect) {
+        sourceSelect.addEventListener("change", () => loadEventTimeline());
+    }
+    if (classSelect) {
+        classSelect.addEventListener("change", () => loadEventTimeline());
+    }
+    if (timeSelect) {
+        timeSelect.addEventListener("change", () => loadEventTimeline());
+    }
+    if (trackInput) {
+        let debounceTimer = null;
+        trackInput.addEventListener("input", () => {
+            clearTimeout(debounceTimer);
+            debounceTimer = setTimeout(() => loadEventTimeline(), 300);
+        });
+    }
+    if (refreshBtn) {
+        refreshBtn.addEventListener("click", () => loadEventTimeline());
+    }
 }
 
 // ==========================================
@@ -1896,17 +2134,23 @@ function setupEventListeners() {
         });
     }
 
-    // Toggle All Scene Objects in Canvas
+    // Toggle All Scene Objects & Live Bounding Box Trackers in Canvas
     const btnToggleAllBoxes = document.getElementById("btn-toggle-all-boxes");
     if (btnToggleAllBoxes) {
         btnToggleAllBoxes.addEventListener("click", () => {
-            showAllSceneObjects = !showAllSceneObjects;
-            if (showAllSceneObjects) {
-                btnToggleAllBoxes.textContent = "👁️ All Objects: ON";
+            showBoundingBoxes = !showBoundingBoxes;
+            showAllSceneObjects = showBoundingBoxes;
+            if (showBoundingBoxes) {
+                btnToggleAllBoxes.textContent = "👁️ BBoxes: ON";
                 btnToggleAllBoxes.classList.add("active");
             } else {
-                btnToggleAllBoxes.textContent = "🎯 Target Only";
+                btnToggleAllBoxes.textContent = "👁️ BBoxes: OFF";
                 btnToggleAllBoxes.classList.remove("active");
+                // Immediately clear all visible canvases
+                document.querySelectorAll(".feed-canvas").forEach(c => {
+                    const ctx = c.getContext("2d");
+                    if (ctx) ctx.clearRect(0, 0, c.width, c.height);
+                });
             }
             if (activeTrackerRender) {
                 activeTrackerRender();
@@ -1950,7 +2194,770 @@ function setupEventListeners() {
         if (currentEvidenceData) {
             drawBoundingBoxes(currentEvidenceData.bounding_boxes);
         }
+        if (currentLiveDetections && currentLiveDetections.length > 0) {
+            renderLiveDetections(currentLiveDetections);
+        }
     });
+}
+
+// ==========================================
+// 10. LIVE CAMERA STREAMING & CONTROLS
+// ==========================================
+let liveDetectionPollTimer = null;
+let currentLiveDetections = [];
+
+function drawCameraDetectionsOnCanvas(canvasId, mediaId, detections, camMeta, pInfo) {
+    const canvas = document.getElementById(canvasId);
+    if (!canvas) return;
+
+    const parent = canvas.parentElement;
+    if (!parent) return;
+
+    const containerW = parent.clientWidth;
+    const containerH = parent.clientHeight;
+    if (containerW <= 0 || containerH <= 0) return;
+
+    if (canvas.width !== containerW || canvas.height !== containerH) {
+        canvas.width = containerW;
+        canvas.height = containerH;
+    }
+
+    const ctx = canvas.getContext("2d");
+    ctx.clearRect(0, 0, containerW, containerH);
+
+    if (!showBoundingBoxes) return;
+    if (!detections || detections.length === 0) return;
+
+    let mediaEl = document.getElementById(mediaId);
+    if (mediaId === "primary-youtube-iframe" && typeof cameraPlayerModes !== "undefined" && cameraPlayerModes[activeCameraId] === "direct") {
+        // Direct YouTube embed is not decoded on server; prevent misleading desynchronized overlays
+        return;
+    }
+
+    let imgW = (pInfo && pInfo.frame_width) || (camMeta && camMeta.width) || 1280;
+    let imgH = (pInfo && pInfo.frame_height) || (camMeta && camMeta.height) || 720;
+    if (mediaEl && mediaEl.tagName === "IMG" && mediaEl.naturalWidth > 0 && mediaEl.naturalHeight > 0) {
+        imgW = mediaEl.naturalWidth;
+        imgH = mediaEl.naturalHeight;
+    }
+
+    const aspect = imgW / imgH;
+    const containerAspect = containerW / containerH;
+
+    let renderW, renderH, offsetX, offsetY;
+    if (containerAspect > aspect) {
+        renderH = containerH;
+        renderW = renderH * aspect;
+        offsetX = (containerW - renderW) / 2;
+        offsetY = 0;
+    } else {
+        renderW = containerW;
+        renderH = renderW / aspect;
+        offsetX = 0;
+        offsetY = (containerH - renderH) / 2;
+    }
+
+    const scaleX = renderW / imgW;
+    const scaleY = renderH / imgH;
+
+    for (const det of detections) {
+        const bbox = det.bbox;
+        if (!bbox || bbox.length < 4) continue;
+
+        const bx = offsetX + bbox[0] * scaleX;
+        const by = offsetY + bbox[1] * scaleY;
+        const bw = (bbox[2] - bbox[0]) * scaleX;
+        const bh = (bbox[3] - bbox[1]) * scaleY;
+
+        if (bw <= 0 || bh <= 0) continue;
+
+        const isTentative = det.track_state === "tentative" || det.track_id === null || det.track_id === undefined;
+        const isPredicted = Boolean(det.is_predicted);
+
+        const cKey = (det.label || det.class || "object").toLowerCase();
+        const pal = OBJECT_PALETTES[cKey] || {
+            stroke: "#10b981",
+            fill: "rgba(16, 185, 129, 0.15)",
+            badgeBg: "#10b981",
+            badgeText: "#022c22"
+        };
+
+        if (isTentative || isPredicted) {
+            ctx.setLineDash([5, 4]);
+        } else {
+            ctx.setLineDash([]);
+        }
+
+        // 1. Dark contrast halo
+        ctx.strokeStyle = "rgba(0, 0, 0, 0.85)";
+        ctx.lineWidth = 3.5;
+        ctx.strokeRect(bx, by, bw, bh);
+
+        // 2. Translucent fill
+        ctx.fillStyle = isPredicted ? "rgba(148, 163, 184, 0.12)" : pal.fill;
+        ctx.fillRect(bx, by, bw, bh);
+
+        // 3. Colored boundary box
+        ctx.strokeStyle = isPredicted ? "#94a3b8" : pal.stroke;
+        ctx.lineWidth = 2.0;
+        ctx.strokeRect(bx, by, bw, bh);
+
+        // 4. Precision Corner Target Brackets (solid)
+        ctx.setLineDash([]);
+        const cornerLen = Math.max(6, Math.min(14, bw / 4, bh / 4));
+        ctx.strokeStyle = isPredicted ? "#94a3b8" : pal.stroke;
+        ctx.lineWidth = 3.0;
+        ctx.lineCap = "round";
+
+        ctx.beginPath();
+        ctx.moveTo(bx, by + cornerLen);
+        ctx.lineTo(bx, by);
+        ctx.lineTo(bx + cornerLen, by);
+        ctx.stroke();
+
+        ctx.beginPath();
+        ctx.moveTo(bx + bw - cornerLen, by);
+        ctx.lineTo(bx + bw, by);
+        ctx.lineTo(bx + bw, by + cornerLen);
+        ctx.stroke();
+
+        ctx.beginPath();
+        ctx.moveTo(bx, by + bh - cornerLen);
+        ctx.lineTo(bx, by + bh);
+        ctx.lineTo(bx + cornerLen, by + bh);
+        ctx.stroke();
+
+        ctx.beginPath();
+        ctx.moveTo(bx + bw - cornerLen, by + bh);
+        ctx.lineTo(bx + bw, by + bh);
+        ctx.lineTo(bx + bw, by + bh - cornerLen);
+        ctx.stroke();
+
+        // 5. Header tag with class, track_id, real model confidence, and tracking state
+        const rawConf = (det.raw_confidence !== undefined && det.raw_confidence !== null) ? Number(det.raw_confidence) : Number(det.confidence);
+        const confStr = (!isNaN(rawConf) && rawConf > 0) ? ` ${Math.round(rawConf * 100)}%` : "";
+        const tidStr = (det.track_id !== null && det.track_id !== undefined) ? ` #${det.track_id}` : "";
+        const stateTag = isPredicted ? " [PRED]" : (isTentative ? " [TENT]" : " [TRK]");
+        const tagText = `● ${det.label.toUpperCase()}${tidStr}${confStr}${stateTag}`;
+
+        ctx.font = "bold 9px Inter, system-ui, sans-serif";
+        const tagW = ctx.measureText(tagText).width + 10;
+        const tagH = 16;
+        let tagX = bx;
+        let tagY = by - tagH;
+        if (tagY < 2) tagY = by + 2;
+        if (tagX + tagW > containerW - 2) tagX = containerW - tagW - 2;
+        if (tagX < 2) tagX = 2;
+
+        ctx.fillStyle = isPredicted ? "#475569" : pal.badgeBg;
+        ctx.fillRect(tagX, tagY, tagW, tagH);
+
+        ctx.fillStyle = isPredicted ? "#f1f5f9" : pal.badgeText;
+        ctx.fillText(tagText, tagX + 5, tagY + 11);
+    }
+    ctx.setLineDash([]);
+}
+
+function renderLiveDetections(detections, camMeta) {
+    const isDirect = cameraPlayerModes[activeCameraId] === "direct";
+    const mediaId = isDirect ? "primary-youtube-iframe" : "live-stream-img";
+    drawCameraDetectionsOnCanvas("evidence-canvas", mediaId, detections, camMeta);
+}
+
+function startLiveMatrixDetectionPolling() {
+    if (liveMatrixPollTimer) {
+        clearInterval(liveMatrixPollTimer);
+        liveMatrixPollTimer = null;
+    }
+
+    const poll = async () => {
+        try {
+            const res = await fetch("/api/cameras/detections/matrix");
+            if (!res.ok) return;
+            const matrixData = await res.json();
+            latestMatrixDetections = matrixData || {};
+
+            // 1. Primary Camera
+            if (activeCameraId) {
+                const primaryCam = allCameras.find(c => c.id === activeCameraId);
+                const pInfo = matrixData[activeCameraId];
+                const primaryDets = pInfo?.detections || [];
+                currentLiveDetections = primaryDets;
+
+                const isYt = primaryCam && (primaryCam.source_type === "youtube_live" || Boolean(extractYouTubeVideoId(primaryCam.video_path)));
+                const mediaId = isYt ? "primary-youtube-iframe" : "live-stream-img";
+                drawCameraDetectionsOnCanvas("evidence-canvas", mediaId, primaryDets, primaryCam, pInfo);
+
+                // Update primary live indicators in watermark and header
+                const hudOffset = document.getElementById("hud-offset");
+                const hudTimestamp = document.getElementById("hud-timestamp");
+                const watermarkTime = document.getElementById("watermark-time");
+
+                if (pInfo && pInfo.status === "active") {
+                    if (hudOffset) {
+                        const capFps = pInfo.capture_fps !== undefined ? pInfo.capture_fps : (pInfo.fps || 0);
+                        const infFps = pInfo.inference_fps !== undefined ? pInfo.inference_fps : (pInfo.fps || 0);
+                        hudOffset.textContent = `Cap: ${capFps} FPS | Inf: ${infFps} FPS | Lat: ${pInfo.latency_ms || 0}ms | Tracks: ${pInfo.active_tracks_count || 0}`;
+                    }
+                    if (hudTimestamp) {
+                        hudTimestamp.textContent = new Date().toLocaleTimeString();
+                    }
+                    if (watermarkTime) {
+                        const h = pInfo.pipeline_health || {};
+                        const pIcon = h.preview_working ? "✓PRV" : "✗PRV";
+                        const fIcon = h.frames_reaching_detector ? "✓FRM" : "✗FRM";
+                        const dIcon = h.inference_working ? "✓DET" : "✗DET";
+                        const tIcon = h.tracking_working ? "✓TRK" : "✗TRK";
+                        watermarkTime.textContent = `${pIcon} ${fIcon} ${dIcon} ${tIcon} • ${pInfo.frames_analyzed || 0}F`;
+                    }
+                }
+            }
+
+            // 2. Secondary Cameras in the Grid
+            if (currentGridMode > 1) {
+                const secondaryCameras = allCameras.filter(c => c.id !== activeCameraId).slice(0, currentGridMode - 1);
+                secondaryCameras.forEach(cam => {
+                    const canvasId = `canvas-${cam.id}`;
+                    const mediaId = `media-${cam.id}`;
+                    const pInfo = matrixData[cam.id];
+                    const dets = pInfo?.detections || [];
+                    drawCameraDetectionsOnCanvas(canvasId, mediaId, dets, cam, pInfo);
+
+                    // Real-time Watermark & HUD updates for all cameras in the grid
+                    const wmTime = document.getElementById(`wm-time-${cam.id}`);
+                    if (wmTime) {
+                        if (pInfo && pInfo.status === "active") {
+                            wmTime.textContent = `TRACKING • ${pInfo.frames_analyzed || 0} FRAMES`;
+                            wmTime.style.color = "var(--emerald-status)";
+                        } else {
+                            wmTime.textContent = cam.status === "CONNECTED" ? "CONNECTED" : "STANDBY";
+                            wmTime.style.color = "var(--text-muted)";
+                        }
+                    }
+                    const hudTargets = document.getElementById(`hud-targets-${cam.id}`);
+                    if (hudTargets && pInfo) {
+                        hudTargets.textContent = `${pInfo.count || dets.length} TARGETS`;
+                    }
+                    const hudFps = document.getElementById(`hud-fps-${cam.id}`);
+                    if (hudFps && pInfo) {
+                        hudFps.textContent = `${pInfo.fps || 0}`;
+                    }
+                    const hudLat = document.getElementById(`hud-lat-${cam.id}`);
+                    if (hudLat && pInfo) {
+                        hudLat.textContent = `${pInfo.latency_ms || 0}ms`;
+                    }
+                    const hudPill = document.getElementById(`hud-${cam.id}`);
+                    if (hudPill) {
+                        if (pInfo && pInfo.status === "active" && dets.length > 0) {
+                            hudPill.classList.remove("hidden");
+                        }
+                    }
+                    const card = document.getElementById(`feed-card-${cam.id}`);
+                    if (card) {
+                        const badge = card.querySelector(".badge-live-tag");
+                        if (badge) {
+                            if (pInfo && pInfo.status === "active") {
+                                badge.innerHTML = `● LIVE AI (${pInfo.count || dets.length})`;
+                                badge.style.background = "rgba(0,213,160,0.15)";
+                                badge.style.borderColor = "var(--emerald-status)";
+                                badge.style.color = "var(--emerald-status)";
+                            }
+                        }
+                    }
+                });
+            }
+
+            // 3. Overview Hero Big Screen Live Tracking
+            const overviewCanvas = document.getElementById("overview-canvas");
+            if (overviewCanvas && activeCameraId) {
+                const activeCam = allCameras.find(c => c.id === activeCameraId);
+                const activeDets = matrixData[activeCameraId]?.detections || [];
+                const isYtDirect = cameraPlayerModes[activeCameraId] === "direct" || (activeCam && activeCam.source_type === "youtube_live" && activeCam.status !== "CONNECTED");
+                const overviewMediaId = (isYtDirect && Boolean(extractYouTubeVideoId(activeCam?.video_path)))
+                    ? "overview-youtube-iframe"
+                    : (activeCam?.status === "CONNECTED" ? "overview-live-img" : "overview-video");
+                
+                drawCameraDetectionsOnCanvas("overview-canvas", overviewMediaId, activeDets, activeCam);
+                
+                const ovName = document.getElementById("overview-cam-name");
+                const ovRes = document.getElementById("overview-cam-res");
+                const pInfo = matrixData[activeCameraId];
+                if (ovName && activeCam) {
+                    const trackCount = pInfo?.count || activeDets.length || 0;
+                    ovName.textContent = `CAM: ${activeCam.name || activeCam.id} (${trackCount} TARGETS)`;
+                }
+                if (ovRes && pInfo) {
+                    ovRes.textContent = `${pInfo.fps || 30} FPS • LATENCY: ${pInfo.latency_ms || 0}ms`;
+                }
+            }
+
+        } catch (err) {
+            // Silently handle brief network drop
+        }
+    };
+
+    poll();
+    liveMatrixPollTimer = setInterval(poll, 260);
+}
+
+function startLiveDetectionPolling(cameraId, cam) {
+    startLiveMatrixDetectionPolling();
+}
+
+function displayLiveCamera(cameraId) {
+    const cam = allCameras.find(c => c.id === cameraId);
+    if (!cam) return;
+
+    const videoEl = document.getElementById("evidence-video");
+    const liveImg = document.getElementById("live-stream-img");
+    const primaryYtIframe = document.getElementById("primary-youtube-iframe");
+    const frameImg = document.getElementById("evidence-frame-img");
+    const statusBadge = document.getElementById("player-status-badge");
+    const hudVerdict = document.getElementById("hud-verdict");
+    const hudSummary = document.getElementById("hud-summary");
+    const hudCamera = document.getElementById("hud-camera");
+    const hudTimestamp = document.getElementById("hud-timestamp");
+    const hudOffset = document.getElementById("hud-offset");
+    const hudRelevance = document.getElementById("hud-relevance");
+    const hudClipWindow = document.getElementById("hud-clip-window");
+    const watermarkCam = document.getElementById("watermark-cam");
+    const watermarkTime = document.getElementById("watermark-time");
+    const discActiveBtn = document.getElementById("btn-disconnect-active-cam");
+    const btnPrimaryToggle = document.getElementById("btn-primary-toggle-mode");
+
+    stopEvidenceTracker();
+
+    const evidenceHud = document.getElementById("evidence-hud");
+    if (evidenceHud) {
+        evidenceHud.classList.add("hidden");
+    }
+    const btnCloseHud = document.getElementById("btn-close-hud");
+    if (btnCloseHud && !btnCloseHud.onclick) {
+        btnCloseHud.onclick = () => {
+            const h = document.getElementById("evidence-hud");
+            if (h) h.classList.add("hidden");
+        };
+    }
+
+    if (videoEl) {
+        videoEl.pause();
+        videoEl.src = "";
+        videoEl.classList.add("hidden");
+    }
+    if (frameImg) {
+        frameImg.src = "";
+        frameImg.classList.add("hidden");
+    }
+
+    const isYt = cam.source_type === "youtube_live" || Boolean(extractYouTubeVideoId(cam.video_path));
+    const ytId = extractYouTubeVideoId(cam.video_path);
+    const isConn = cam.status === "CONNECTED";
+    const preferDirect = isYt ? (cameraPlayerModes[cameraId] !== "ai") : (cameraPlayerModes[cameraId] === "direct");
+
+    if (btnPrimaryToggle) {
+        if (isYt && ytId) {
+            btnPrimaryToggle.classList.remove("hidden");
+            if (preferDirect) {
+                btnPrimaryToggle.textContent = "🤖 Switch to AI Feed";
+                btnPrimaryToggle.classList.add("active");
+            } else {
+                btnPrimaryToggle.textContent = "📺 Direct YT Player";
+                btnPrimaryToggle.classList.remove("active");
+            }
+            btnPrimaryToggle.onclick = () => {
+                cameraPlayerModes[cameraId] = preferDirect ? "ai" : "direct";
+                displayLiveCamera(cameraId);
+                renderMonitoringMatrix();
+            };
+        } else {
+            btnPrimaryToggle.classList.add("hidden");
+        }
+    }
+
+    if (isYt && ytId && preferDirect) {
+        if (liveImg) {
+            liveImg.src = "";
+            liveImg.classList.add("hidden");
+        }
+        if (videoEl) {
+            videoEl.src = "";
+            videoEl.classList.add("hidden");
+        }
+        if (primaryYtIframe) {
+            const ytEmbedUrl = `https://www.youtube-nocookie.com/embed/${ytId}?autoplay=1&mute=1&playsinline=1&enablejsapi=1`;
+            if (primaryYtIframe.src !== ytEmbedUrl) {
+                primaryYtIframe.src = ytEmbedUrl;
+            }
+            primaryYtIframe.classList.remove("hidden");
+        }
+        if (statusBadge) {
+            statusBadge.textContent = isConn ? "● LIVE AI STREAM ACTIVE" : "● LIVE (STANDALONE)";
+            statusBadge.className = "badge live-badge";
+            statusBadge.style.color = "var(--emerald-status)";
+            statusBadge.style.borderColor = "var(--emerald-status)";
+        }
+        if (hudVerdict) {
+            hudVerdict.textContent = "LIVE CCTV FEED (YOLO AI)";
+            hudVerdict.className = "verdict-tag match";
+        }
+        if (hudSummary) {
+            hudSummary.textContent = `Streaming live feed. Real-time YOLO-World tracking & ByteTrack are active in parallel.`;
+        }
+    } else if (isConn || (isYt && !preferDirect)) {
+        if (primaryYtIframe) {
+            primaryYtIframe.src = "";
+            primaryYtIframe.classList.add("hidden");
+        }
+        if (liveImg) {
+            liveImg.onerror = () => {
+                console.warn(`[PrimaryView] AI MJPEG stream error for ${cameraId}, reverting to direct player.`);
+                cameraPlayerModes[cameraId] = "direct";
+                displayLiveCamera(cameraId);
+            };
+            liveImg.src = `/api/cameras/${cameraId}/live?t=${Date.now()}`;
+            liveImg.classList.remove("hidden");
+        }
+        if (statusBadge) {
+            statusBadge.textContent = "● LIVE AI STREAM ACTIVE";
+            statusBadge.className = "badge live-badge";
+            statusBadge.style.color = "var(--emerald-status)";
+            statusBadge.style.borderColor = "var(--emerald-status)";
+        }
+        if (hudVerdict) {
+            hudVerdict.textContent = "LIVE CCTV FEED (YOLO AI)";
+            hudVerdict.className = "verdict-tag yes";
+        }
+        if (hudSummary) {
+            hudSummary.textContent = `Streaming live real-time frames from ${cam.name} (${cameraId}) [${cam.resolution || '1080p'} @ ${cam.fps || 30} FPS] with YOLO-World inference.`;
+        }
+    } else if (isYt && ytId) {
+        if (liveImg) {
+            liveImg.src = "";
+            liveImg.classList.add("hidden");
+        }
+        if (primaryYtIframe) {
+            primaryYtIframe.src = `https://www.youtube-nocookie.com/embed/${ytId}?autoplay=1&mute=1&playsinline=1&enablejsapi=1`;
+            primaryYtIframe.classList.remove("hidden");
+        }
+        if (statusBadge) {
+            statusBadge.textContent = "● YT LIVE STANDBY";
+            statusBadge.className = "badge live-badge";
+            statusBadge.style.color = "#f59e0b";
+        }
+        if (hudVerdict) {
+            hudVerdict.textContent = "YOUTUBE LIVE READY";
+            hudVerdict.className = "verdict-tag yes";
+        }
+        if (hudSummary) {
+            hudSummary.textContent = `Playing direct YouTube stream for ${cam.name}. Click '⚡ Connect Feed' to attach AI detection.`;
+        }
+    } else {
+        if (primaryYtIframe) {
+            primaryYtIframe.src = "";
+            primaryYtIframe.classList.add("hidden");
+        }
+        if (liveImg) {
+            liveImg.src = "";
+            liveImg.classList.add("hidden");
+        }
+        if (statusBadge) {
+            statusBadge.textContent = "OFFLINE";
+            statusBadge.className = "badge";
+        }
+        if (hudVerdict) {
+            hudVerdict.textContent = "FEED OFFLINE";
+            hudVerdict.className = "verdict-tag match";
+        }
+        if (hudSummary) {
+            hudSummary.textContent = `Camera ${cam.name} is currently disconnected. Reconnect stream to resume live analysis.`;
+        }
+    }
+
+    if (hudCamera) hudCamera.textContent = `${cam.name} (${cameraId})`;
+    if (hudTimestamp) hudTimestamp.textContent = new Date().toLocaleTimeString();
+    if (hudOffset) hudOffset.textContent = "REAL-TIME LIVE";
+    if (hudRelevance) hudRelevance.textContent = "100%";
+    if (hudClipWindow) hudClipWindow.textContent = "Continuous Stream";
+
+    if (watermarkCam) watermarkCam.textContent = `LIVE: ${cameraId.toUpperCase()}`;
+    if (watermarkTime) watermarkTime.textContent = `STREAMING`;
+
+    if (discActiveBtn) {
+        if (isConn) {
+            discActiveBtn.classList.remove("hidden");
+        } else {
+            discActiveBtn.classList.add("hidden");
+        }
+    }
+
+    if (isConn) {
+        startLiveDetectionPolling(cameraId, cam);
+    }
+    loadVideoAnalysisSummary(cameraId);
+}
+
+function stopLiveCameraStream() {
+    if (liveDetectionPollTimer) {
+        clearInterval(liveDetectionPollTimer);
+        liveDetectionPollTimer = null;
+    }
+    currentLiveDetections = [];
+    const canvas = document.getElementById("evidence-canvas");
+    if (canvas) {
+        const ctx = canvas.getContext("2d");
+        if (ctx) ctx.clearRect(0, 0, canvas.width, canvas.height);
+    }
+    const liveImg = document.getElementById("live-stream-img");
+    const primaryYtIframe = document.getElementById("primary-youtube-iframe");
+    const discActiveBtn = document.getElementById("btn-disconnect-active-cam");
+    if (liveImg) {
+        liveImg.src = "";
+        liveImg.classList.add("hidden");
+    }
+    if (primaryYtIframe) {
+        primaryYtIframe.src = "";
+        primaryYtIframe.classList.add("hidden");
+    }
+    if (discActiveBtn) discActiveBtn.classList.add("hidden");
+}
+
+async function disconnectCamera(cameraId) {
+    try {
+        const res = await fetch(`/api/cameras/${cameraId}/disconnect`, { method: "POST" });
+        if (!res.ok) throw new Error("Disconnect failed");
+        appendChatMessage("assistant", `🔌 <strong>Camera Disconnected</strong>: Released stream resources for <code>${cameraId}</code>.`, true);
+        if (typeof showAppToast === "function") {
+            showAppToast("Stream Disconnected", `Camera ${cameraId} feed has been disconnected.`, "info");
+        }
+        if (activeCameraId === cameraId) {
+            stopLiveCameraStream();
+            clearEvidencePlayer("Live camera disconnected.");
+        }
+        await loadCameras();
+    } catch (err) {
+        if (typeof showAppToast === "function") {
+            showAppToast("Disconnect Failed", err.message, "error");
+        }
+        alert("Error disconnecting camera: " + err.message);
+    }
+}
+
+async function reconnectCamera(cam) {
+    if (!cam) return;
+    if (typeof showAppToast === "function") {
+        showAppToast("Connecting Stream", `Initiating connection to ${cam.name}...`, "info");
+    }
+    try {
+        const res = await fetch("/api/cameras/connect", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                camera_id: cam.id,
+                name: cam.name,
+                stream_url: cam.video_path,
+                source_type: cam.source_type,
+                record_stream: false,
+                timeout: cam.source_type === "youtube_live" ? 25.0 : 8.0
+            })
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || "Connection failed");
+        if (typeof showAppToast === "function") {
+            showAppToast("Stream Online", `Connected ${cam.name} (${data.resolution || '1080p'} @ ${data.fps || 30} FPS)`, "success");
+        }
+        await loadCameras();
+        activeCameraId = cam.id;
+        displayLiveCamera(cam.id);
+    } catch (err) {
+        if (typeof showAppToast === "function") {
+            showAppToast("Connection Failed", err.message, "error");
+        } else {
+            alert("Connection error: " + err.message);
+        }
+    }
+}
+
+function setupConnectCameraHandlers() {
+    const connectModal = document.getElementById("connect-modal");
+    const btnOpenConnect = document.getElementById("btn-connect-camera-nav");
+    const btnCloseConnect = document.getElementById("btn-close-connect-modal");
+    const btnCancelConnect = document.getElementById("btn-cancel-connect");
+    const sourceTypeSelect = document.getElementById("connect-source-type");
+    const groupWebcam = document.getElementById("group-webcam-index");
+    const groupRtsp = document.getElementById("group-rtsp-url");
+    const groupYoutube = document.getElementById("group-youtube-url");
+    const groupTestVideo = document.getElementById("group-test-video");
+    const connectForm = document.getElementById("connect-camera-form");
+    const statusBox = document.getElementById("connect-status-box");
+    const statusText = document.getElementById("connect-status-text");
+    const btnSubmit = document.getElementById("btn-submit-connect");
+    const discActiveBtn = document.getElementById("btn-disconnect-active-cam");
+
+    if (btnOpenConnect) {
+        btnOpenConnect.addEventListener("click", () => {
+            if (statusBox) statusBox.classList.add("hidden");
+            if (connectModal) connectModal.classList.remove("hidden");
+        });
+    }
+    if (btnCloseConnect) {
+        btnCloseConnect.addEventListener("click", () => {
+            if (connectModal) connectModal.classList.add("hidden");
+        });
+    }
+    if (btnCancelConnect) {
+        btnCancelConnect.addEventListener("click", () => {
+            if (connectModal) connectModal.classList.add("hidden");
+        });
+    }
+
+    if (sourceTypeSelect) {
+        sourceTypeSelect.addEventListener("change", () => {
+            const val = sourceTypeSelect.value;
+            if (groupWebcam) groupWebcam.classList.toggle("hidden", val !== "webcam");
+            if (groupRtsp) groupRtsp.classList.toggle("hidden", val !== "rtsp");
+            if (groupYoutube) groupYoutube.classList.toggle("hidden", val !== "youtube_live");
+            if (groupTestVideo) groupTestVideo.classList.toggle("hidden", val !== "test_video");
+        });
+    }
+
+    // Quick Sample Presets for YouTube Live
+    document.querySelectorAll(".btn-sample-chip").forEach(chip => {
+        chip.addEventListener("click", () => {
+            const ytUrl = chip.dataset.ytUrl;
+            const camName = chip.dataset.camName;
+            if (sourceTypeSelect) {
+                sourceTypeSelect.value = "youtube_live";
+                sourceTypeSelect.dispatchEvent(new Event("change"));
+            }
+            const ytInput = document.getElementById("connect-youtube-url");
+            const nameInput = document.getElementById("connect-camera-name");
+            if (ytInput) ytInput.value = ytUrl;
+            if (nameInput) nameInput.value = camName;
+            if (typeof showAppToast === "function") {
+                showAppToast("Preset Loaded", `Selected "${camName}"`, "info");
+            }
+        });
+    });
+
+    if (discActiveBtn) {
+        discActiveBtn.addEventListener("click", async () => {
+            if (activeCameraId) {
+                const cam = allCameras.find(c => c.id === activeCameraId);
+                const name = cam ? cam.name : activeCameraId;
+                if (confirm(`Disconnect active feed "${name}" (${activeCameraId})?`)) {
+                    await disconnectCamera(activeCameraId);
+                }
+            }
+        });
+    }
+
+    if (connectForm) {
+        connectForm.addEventListener("submit", async (e) => {
+            e.preventDefault();
+            const sourceType = sourceTypeSelect ? sourceTypeSelect.value : "webcam";
+            let streamUrl = "";
+
+            if (sourceType === "webcam") {
+                const idxEl = document.getElementById("connect-webcam-index");
+                streamUrl = (idxEl && idxEl.value.trim()) ? idxEl.value.trim() : "0";
+            } else if (sourceType === "rtsp") {
+                const rtspEl = document.getElementById("connect-rtsp-url");
+                streamUrl = rtspEl ? rtspEl.value.trim() : "";
+                if (!streamUrl) {
+                    alert("Please enter a valid RTSP stream URL.");
+                    return;
+                }
+            } else if (sourceType === "youtube_live") {
+                const ytEl = document.getElementById("connect-youtube-url");
+                streamUrl = ytEl ? ytEl.value.trim() : "";
+                if (!streamUrl) {
+                    alert("Please enter a valid YouTube Live URL.");
+                    return;
+                }
+            } else if (sourceType === "test_video") {
+                const testEl = document.getElementById("connect-test-path");
+                streamUrl = (testEl && testEl.value.trim()) ? testEl.value.trim() : "test_cctv.mp4";
+            }
+
+            const nameEl = document.getElementById("connect-camera-name");
+            const idEl = document.getElementById("connect-camera-id");
+            const camName = nameEl ? nameEl.value.trim() : "";
+            const camId = idEl ? idEl.value.trim() : "";
+
+            const recordCheck = document.getElementById("connect-record-stream");
+            const recordStream = recordCheck ? recordCheck.checked : false;
+
+            if (statusBox) statusBox.classList.remove("hidden");
+            if (statusText) {
+                statusText.textContent = sourceType === "youtube_live"
+                    ? "⏳ Resolving YouTube Live stream & verifying video feed..."
+                    : "⏳ Connecting to camera stream & verifying frames...";
+                statusText.style.color = "var(--text-primary)";
+            }
+            if (btnSubmit) btnSubmit.disabled = true;
+
+            try {
+                const res = await fetch("/api/cameras/connect", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        camera_id: camId || undefined,
+                        name: camName || undefined,
+                        stream_url: streamUrl,
+                        source_type: sourceType,
+                        record_stream: recordStream,
+                        timeout: sourceType === "youtube_live" ? 25.0 : 8.0
+                    })
+                });
+
+                const data = await res.json();
+                if (!res.ok) {
+                    throw new Error(data.detail || "Connection failed");
+                }
+
+                if (statusText) {
+                    statusText.textContent = `✅ Connected successfully! (${data.resolution || '768x432'} @ ${data.fps || 25} FPS)`;
+                    statusText.style.color = "#34d399";
+                }
+
+                if (typeof showAppToast === "function") {
+                    showAppToast("Stream Online", `Connected ${data.camera_name || data.camera_id} (${data.resolution || '1080p'} @ ${data.fps || 30} FPS)`, "success");
+                }
+
+                setTimeout(async () => {
+                    if (connectModal) connectModal.classList.add("hidden");
+                    if (btnSubmit) btnSubmit.disabled = false;
+                    if (statusBox) statusBox.classList.add("hidden");
+                    connectForm.reset();
+                    if (groupWebcam) groupWebcam.classList.remove("hidden");
+                    if (groupRtsp) groupRtsp.classList.add("hidden");
+                    if (groupYoutube) groupYoutube.classList.add("hidden");
+                    if (groupTestVideo) groupTestVideo.classList.add("hidden");
+
+                    await loadCameras();
+                    activeCameraId = data.camera_id;
+                    displayLiveCamera(data.camera_id);
+
+                    const srcLabel = sourceType === "youtube_live" ? "YouTube Live Stream" : "Live Camera";
+                    appendChatMessage(
+                        "assistant",
+                        `📹 <strong>${srcLabel} Connected</strong>: Connected to <code>${escapeHtml(data.camera_name || data.camera_id)}</code> (${data.resolution || '768x432'} @ ${data.fps || 25} FPS). Real-time live preview is now active.`,
+                        true
+                    );
+                }, 500);
+
+            } catch (err) {
+                if (statusText) {
+                    statusText.textContent = `❌ ${err.message}`;
+                    statusText.style.color = "var(--status-error)";
+                }
+                if (typeof showAppToast === "function") {
+                    showAppToast("Connection Failed", err.message, "error");
+                }
+                if (btnSubmit) btnSubmit.disabled = false;
+            }
+        });
+    }
 }
 
 function capitalize(str) {
@@ -1964,3 +2971,2559 @@ function escapeHtml(text) {
     div.textContent = text;
     return div.innerHTML;
 }
+
+// ========================================================
+// STAGE G: REAL-TIME ALERTING, RULES & DRAWING TOOL
+// ========================================================
+
+let drawnPoints = []; // Array of [norm_x, norm_y]
+let isDrawingMode = false;
+let lastKnownAlertTime = Date.now() / 1000.0;
+let knownAlertIds = new Set();
+
+function setupAlertingHandlers() {
+    // 1. Alert Rules Modal open/close
+    const btnRulesNav = document.getElementById("btn-alert-rules-nav");
+    const rulesModal = document.getElementById("alert-rules-modal");
+    const btnCloseRules = document.getElementById("btn-close-rules-modal");
+    const tabBtnList = document.getElementById("tab-btn-rule-list");
+    const tabBtnCreate = document.getElementById("tab-btn-rule-create");
+    const tabContentList = document.getElementById("tab-content-rule-list");
+    const tabContentCreate = document.getElementById("tab-content-rule-create");
+    const ruleCamSelect = document.getElementById("rule-camera");
+
+    if (btnRulesNav && rulesModal) {
+        btnRulesNav.addEventListener("click", () => {
+            // Populate camera select
+            if (ruleCamSelect) {
+                ruleCamSelect.innerHTML = `<option value="">All Registered Cameras</option>`;
+                allCameras.forEach(c => {
+                    const opt = document.createElement("option");
+                    opt.value = c.id;
+                    opt.textContent = `${c.name || c.id} (${c.source_type || 'cctv'})`;
+                    if (c.id === activeCameraId) opt.selected = true;
+                    ruleCamSelect.appendChild(opt);
+                });
+            }
+            loadAlertRules();
+            switchRuleTab("list");
+            rulesModal.classList.remove("hidden");
+        });
+    }
+
+    if (btnCloseRules && rulesModal) {
+        btnCloseRules.addEventListener("click", () => rulesModal.classList.add("hidden"));
+    }
+
+    if (tabBtnList && tabBtnCreate) {
+        tabBtnList.addEventListener("click", () => switchRuleTab("list"));
+        tabBtnCreate.addEventListener("click", () => switchRuleTab("create"));
+    }
+
+    const btnCancelCreate = document.getElementById("btn-cancel-create-rule");
+    if (btnCancelCreate) {
+        btnCancelCreate.addEventListener("click", () => switchRuleTab("list"));
+    }
+
+    // Dynamic field adjustments based on rule type
+    const ruleTypeSelect = document.getElementById("rule-type");
+    if (ruleTypeSelect) {
+        ruleTypeSelect.addEventListener("change", (e) => {
+            adjustRuleFormFields(e.target.value);
+        });
+    }
+
+    // Create Rule Form Submit
+    const createRuleForm = document.getElementById("create-rule-form");
+    if (createRuleForm) {
+        createRuleForm.addEventListener("submit", async (e) => {
+            e.preventDefault();
+            const btnSubmit = document.getElementById("btn-submit-rule");
+            if (btnSubmit) btnSubmit.disabled = true;
+
+            try {
+                const name = document.getElementById("rule-name").value.trim();
+                const cameraId = document.getElementById("rule-camera").value || null;
+                const ruleType = document.getElementById("rule-type").value;
+                const targetClass = document.getElementById("rule-target-class").value.trim() || null;
+                const minConf = parseFloat(document.getElementById("rule-min-conf").value) || 0.3;
+                const severity = document.getElementById("rule-severity").value;
+                const cooldown = parseFloat(document.getElementById("rule-cooldown").value) || 30.0;
+                
+                let timeStart = null;
+                let timeEnd = null;
+                if (ruleType === "restricted_hours") {
+                    timeStart = document.getElementById("rule-time-start").value || "22:00";
+                    timeEnd = document.getElementById("rule-time-end").value || "06:00";
+                }
+
+                let tripwireLine = null;
+                let zonePoints = null;
+                let direction = "any";
+
+                const coordsStr = document.getElementById("rule-coords-input").value.trim();
+                if (coordsStr) {
+                    try {
+                        const parsed = JSON.parse(coordsStr);
+                        if (ruleType === "tripwire_crossing") {
+                            tripwireLine = parsed;
+                            direction = document.getElementById("rule-direction").value || "any";
+                        } else if (ruleType === "zone_entry" || ruleType === "vehicle_in_region") {
+                            zonePoints = parsed;
+                        }
+                    } catch (err) {
+                        alert("Invalid coordinates JSON. Must be [[x1,y1],[x2,y2]] or [[x1,y1],[x2,y2],[x3,y3],...]");
+                        if (btnSubmit) btnSubmit.disabled = false;
+                        return;
+                    }
+                }
+
+                const payload = {
+                    name,
+                    camera_id: cameraId,
+                    rule_type: ruleType,
+                    object_class: targetClass,
+                    min_confidence: minConf,
+                    time_start: timeStart,
+                    time_end: timeEnd,
+                    tripwire_line: tripwireLine,
+                    zone_points: zonePoints,
+                    direction: direction,
+                    cooldown_seconds: cooldown,
+                    severity: severity,
+                    enabled: true
+                };
+
+                const res = await fetch("/api/alerts/rules", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify(payload)
+                });
+
+                if (!res.ok) {
+                    const errData = await res.json();
+                    throw new Error(errData.detail || "Failed to create rule");
+                }
+
+                createRuleForm.reset();
+                switchRuleTab("list");
+                await loadAlertRules();
+                showToastNotification({
+                    rule_name: name,
+                    camera_name: cameraId || "All Cameras",
+                    trigger_reason: "Alert rule activated and monitoring live feeds.",
+                    severity: "info"
+                });
+
+            } catch (err) {
+                alert(`Error: ${err.message}`);
+            } finally {
+                if (btnSubmit) btnSubmit.disabled = false;
+            }
+        });
+    }
+
+    // 2. Alert History Modal open/close
+    const btnAlertsNav = document.getElementById("btn-alerts-history-nav");
+    const alertsModal = document.getElementById("alerts-history-modal");
+    const btnCloseAlerts = document.getElementById("btn-close-alerts-modal");
+    const btnRefreshAlerts = document.getElementById("btn-refresh-alerts");
+    const filterCam = document.getElementById("filter-alert-cam");
+    const filterSeverity = document.getElementById("filter-alert-severity");
+    const filterStatus = document.getElementById("filter-alert-status");
+
+    if (btnAlertsNav && alertsModal) {
+        btnAlertsNav.addEventListener("click", () => {
+            if (filterCam) {
+                filterCam.innerHTML = `<option value="">All Cameras</option>`;
+                allCameras.forEach(c => {
+                    const opt = document.createElement("option");
+                    opt.value = c.id;
+                    opt.textContent = c.name || c.id;
+                    filterCam.appendChild(opt);
+                });
+            }
+            loadAlertHistory();
+            alertsModal.classList.remove("hidden");
+        });
+    }
+
+    if (btnCloseAlerts && alertsModal) {
+        btnCloseAlerts.addEventListener("click", () => alertsModal.classList.add("hidden"));
+    }
+
+    if (btnRefreshAlerts) {
+        btnRefreshAlerts.addEventListener("click", () => loadAlertHistory());
+    }
+
+    if (filterCam) filterCam.addEventListener("change", () => loadAlertHistory());
+    if (filterSeverity) filterSeverity.addEventListener("change", () => loadAlertHistory());
+    if (filterStatus) filterStatus.addEventListener("change", () => loadAlertHistory());
+
+    // 3. Interactive Drawing Tool
+    setupDrawingTool();
+}
+
+function switchRuleTab(tab) {
+    const tabBtnList = document.getElementById("tab-btn-rule-list");
+    const tabBtnCreate = document.getElementById("tab-btn-rule-create");
+    const tabContentList = document.getElementById("tab-content-rule-list");
+    const tabContentCreate = document.getElementById("tab-content-rule-create");
+
+    if (tab === "list") {
+        tabBtnList.classList.add("active");
+        tabBtnCreate.classList.remove("active");
+        tabContentList.classList.remove("hidden");
+        tabContentCreate.classList.add("hidden");
+    } else {
+        tabBtnCreate.classList.add("active");
+        tabBtnList.classList.remove("active");
+        tabContentCreate.classList.remove("hidden");
+        tabContentList.classList.add("hidden");
+    }
+}
+
+function adjustRuleFormFields(ruleType) {
+    const rowTime = document.getElementById("row-rule-time");
+    const groupDirection = document.getElementById("group-rule-direction");
+    const coordsInput = document.getElementById("rule-coords-input");
+
+    if (ruleType === "restricted_hours") {
+        if (rowTime) rowTime.classList.remove("hidden");
+    } else {
+        if (rowTime) rowTime.classList.add("hidden");
+    }
+
+    if (ruleType === "tripwire_crossing") {
+        if (groupDirection) groupDirection.classList.remove("hidden");
+        if (coordsInput) coordsInput.placeholder = "Tripwire line [[x1, y1], [x2, y2]] normalized 0.0-1.0";
+    } else if (ruleType === "zone_entry" || ruleType === "vehicle_in_region") {
+        if (groupDirection) groupDirection.classList.add("hidden");
+        if (coordsInput) coordsInput.placeholder = "Zone polygon [[x1, y1], [x2, y2], [x3, y3], ...] normalized 0.0-1.0";
+    } else {
+        if (groupDirection) groupDirection.classList.add("hidden");
+        if (coordsInput) coordsInput.placeholder = "Not required for whole-frame detection";
+    }
+}
+
+async function loadAlertRules() {
+    const tbody = document.getElementById("rules-table-body");
+    const countSpan = document.getElementById("rule-list-count");
+    if (!tbody) return;
+
+    try {
+        const res = await fetch("/api/alerts/rules");
+        if (!res.ok) throw new Error("Failed to load rules");
+        const rules = await res.json();
+
+        if (countSpan) countSpan.textContent = rules.length;
+
+        if (rules.length === 0) {
+            tbody.innerHTML = `<tr><td colspan="8" class="text-center" style="padding:20px; color:var(--text-muted);">No alert rules configured yet. Click "+ Create New Rule" above.</td></tr>`;
+            return;
+        }
+
+        tbody.innerHTML = rules.map(r => {
+            const isChecked = r.enabled ? "checked" : "";
+            const camLabel = r.camera_id ? escapeHtml(r.camera_id) : "<em>All Cameras</em>";
+            const targetClass = r.object_class ? escapeHtml(r.object_class) : "<em>any</em>";
+            
+            let condStr = `Min Conf: ${(r.min_confidence * 100).toFixed(0)}%`;
+            if (r.time_start && r.time_end) condStr += `<br><span style="color:#38bdf8;">⏰ ${r.time_start} - ${r.time_end}</span>`;
+            if (r.direction && r.direction !== "any") condStr += `<br><span>Dir: ${r.direction.toUpperCase()}</span>`;
+            if (r.tripwire_line) condStr += `<br><span style="color:#34d399;">Tripwire Active</span>`;
+            if (r.zone_points) condStr += `<br><span style="color:#a78bfa;">Polygon (${r.zone_points.length} pts)</span>`;
+
+            const sevBadge = `<span class="badge-severity-${r.severity || 'warning'}">${(r.severity || 'warning')}</span>`;
+
+            return `
+                <tr>
+                    <td>
+                        <input type="checkbox" ${isChecked} onchange="toggleRuleEnabled('${r.id}', this.checked)" title="Enable / Disable Rule" style="cursor:pointer;" />
+                    </td>
+                    <td><strong>${escapeHtml(r.name)}</strong></td>
+                    <td><code>${escapeHtml(r.rule_type)}</code></td>
+                    <td>${camLabel}</td>
+                    <td><span style="font-family:var(--font-mono);">${targetClass}</span></td>
+                    <td style="font-size:0.72rem;">${condStr}</td>
+                    <td>${sevBadge}</td>
+                    <td>
+                        <button class="btn-subtle btn-sm" onclick="deleteRule('${r.id}')" style="color:#ef4444;" title="Delete Rule">🗑️</button>
+                    </td>
+                </tr>
+            `;
+        }).join("");
+
+    } catch (err) {
+        tbody.innerHTML = `<tr><td colspan="8" class="text-center" style="color:var(--status-error);">Error loading rules: ${err.message}</td></tr>`;
+    }
+}
+
+async function toggleRuleEnabled(ruleId, enabled) {
+    try {
+        const res = await fetch(`/api/alerts/rules/${ruleId}`, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ enabled })
+        });
+        if (!res.ok) throw new Error("Failed to toggle rule");
+    } catch (err) {
+        alert(`Error: ${err.message}`);
+        loadAlertRules();
+    }
+}
+
+async function deleteRule(ruleId) {
+    if (!confirm("Are you sure you want to delete this alert rule?")) return;
+    try {
+        const res = await fetch(`/api/alerts/rules/${ruleId}`, { method: "DELETE" });
+        if (!res.ok) throw new Error("Failed to delete rule");
+        await loadAlertRules();
+    } catch (err) {
+        alert(`Error: ${err.message}`);
+    }
+}
+
+async function loadAlertHistory() {
+    const tbody = document.getElementById("alerts-table-body");
+    if (!tbody) return;
+
+    const filterCam = document.getElementById("filter-alert-cam")?.value || "";
+    const filterSev = document.getElementById("filter-alert-severity")?.value || "";
+    const filterStatus = document.getElementById("filter-alert-status")?.value || "";
+
+    const params = new URLSearchParams();
+    if (filterCam) params.append("camera_id", filterCam);
+    if (filterSev) params.append("severity", filterSev);
+    if (filterStatus) params.append("status", filterStatus);
+    params.append("limit", "100");
+
+    try {
+        const res = await fetch(`/api/alerts?${params.toString()}`);
+        if (!res.ok) throw new Error("Failed to load alerts");
+        const data = await res.json();
+        const alerts = data.alerts || [];
+
+        if (alerts.length === 0) {
+            tbody.innerHTML = `<tr><td colspan="8" class="text-center" style="padding:24px; color:var(--text-muted);">No alerts match the selected criteria.</td></tr>`;
+            return;
+        }
+
+        tbody.innerHTML = alerts.map(a => {
+            const timeStr = new Date(a.trigger_timestamp * 1000).toLocaleTimeString();
+            const dateStr = new Date(a.trigger_timestamp * 1000).toLocaleDateString();
+            const sevBadge = `<span class="badge-severity-${a.severity || 'warning'}">${(a.severity || 'warning')}</span>`;
+            const statusClass = `status-${a.status || 'active'}`;
+            const trackStr = a.track_id ? `ID #${a.track_id}` : "--";
+
+            return `
+                <tr>
+                    <td style="white-space:nowrap; font-family:var(--font-mono); font-size:0.74rem;">${dateStr}<br>${timeStr}</td>
+                    <td>${sevBadge}</td>
+                    <td><strong>${escapeHtml(a.camera_name || a.camera_id)}</strong></td>
+                    <td>${escapeHtml(a.rule_name)}</td>
+                    <td style="font-size:0.76rem;">${escapeHtml(a.trigger_reason)}</td>
+                    <td><span style="font-family:var(--font-mono);">${escapeHtml(a.object_class || '--')} (${trackStr})</span></td>
+                    <td><span class="${statusClass}">${(a.status || 'active').toUpperCase()}</span></td>
+                    <td style="white-space:nowrap;">
+                        ${a.status === 'active' ? `<button class="btn-subtle btn-sm" onclick="acknowledgeAlert('${a.id}')" title="Acknowledge">✓ Ack</button>` : ''}
+                        ${a.status !== 'resolved' ? `<button class="btn-subtle btn-sm" onclick="resolveAlert('${a.id}')" title="Resolve">✔ Resolve</button>` : '<span style="color:#10b981; font-size:0.75rem;">Resolved</span>'}
+                    </td>
+                </tr>
+            `;
+        }).join("");
+
+    } catch (err) {
+        tbody.innerHTML = `<tr><td colspan="8" class="text-center" style="color:var(--status-error);">Error: ${err.message}</td></tr>`;
+    }
+}
+
+async function acknowledgeAlert(alertId) {
+    try {
+        const res = await fetch(`/api/alerts/${alertId}/acknowledge`, { method: "POST" });
+        if (!res.ok) throw new Error("Failed to acknowledge alert");
+        await loadAlertHistory();
+    } catch (err) {
+        alert(err.message);
+    }
+}
+
+async function resolveAlert(alertId) {
+    try {
+        const res = await fetch(`/api/alerts/${alertId}/resolve`, { method: "POST" });
+        if (!res.ok) throw new Error("Failed to resolve alert");
+        await loadAlertHistory();
+    } catch (err) {
+        alert(err.message);
+    }
+}
+
+// 4. Interactive Canvas Geometry Drawing
+function setupDrawingTool() {
+    const btnToggle = document.getElementById("btn-toggle-draw-tool");
+    const toolbar = document.getElementById("drawing-toolbar");
+    const drawTypeSelect = document.getElementById("draw-type-select");
+    const pointsCount = document.getElementById("draw-points-count");
+    const btnClear = document.getElementById("btn-clear-drawing");
+    const btnSave = document.getElementById("btn-save-drawn-rule");
+    const btnCancel = document.getElementById("btn-cancel-drawing");
+    const canvas = document.getElementById("evidence-canvas");
+    let currentHoverPoint = null;
+
+    if (!btnToggle || !toolbar || !canvas) return;
+
+    btnToggle.addEventListener("click", () => {
+        isDrawingMode = !isDrawingMode;
+        if (isDrawingMode) {
+            btnToggle.classList.add("active");
+            toolbar.classList.remove("hidden");
+            canvas.classList.add("drawing-active");
+            drawnPoints = [];
+            currentHoverPoint = null;
+            updateDrawInfo();
+            renderDrawnGeometry();
+        } else {
+            exitDrawingMode();
+        }
+    });
+
+    if (btnCancel) {
+        btnCancel.addEventListener("click", exitDrawingMode);
+    }
+
+    if (btnClear) {
+        btnClear.addEventListener("click", () => {
+            drawnPoints = [];
+            currentHoverPoint = null;
+            updateDrawInfo();
+            renderDrawnGeometry();
+        });
+    }
+
+    if (drawTypeSelect) {
+        drawTypeSelect.addEventListener("change", () => {
+            drawnPoints = [];
+            currentHoverPoint = null;
+            updateDrawInfo();
+            renderDrawnGeometry();
+        });
+    }
+
+    if (btnSave) {
+        btnSave.addEventListener("click", () => {
+            const mode = drawTypeSelect ? drawTypeSelect.value : "tripwire_crossing";
+            if (mode === "tripwire_crossing" && drawnPoints.length !== 2) {
+                alert("Tripwire requires exactly 2 points. Click on the camera view to place start and end points.");
+                return;
+            }
+            if (mode === "zone_entry" && drawnPoints.length < 3) {
+                alert("Zone requires at least 3 points forming a polygon. Click to place points.");
+                return;
+            }
+
+            exitDrawingMode();
+            
+            // Open rules modal and populate form
+            const btnRulesNav = document.getElementById("btn-alert-rules-nav");
+            if (btnRulesNav) btnRulesNav.click();
+
+            switchRuleTab("create");
+            const ruleTypeEl = document.getElementById("rule-type");
+            if (ruleTypeEl) {
+                ruleTypeEl.value = mode;
+                adjustRuleFormFields(mode);
+            }
+            const coordsInput = document.getElementById("rule-coords-input");
+            if (coordsInput) {
+                coordsInput.value = JSON.stringify(drawnPoints);
+            }
+        });
+    }
+
+    // Canvas click to add point
+    canvas.addEventListener("click", (e) => {
+        if (!isDrawingMode) return;
+        const rect = canvas.getBoundingClientRect();
+        const normX = Math.max(0.0, Math.min(1.0, (e.clientX - rect.left) / rect.width));
+        const normY = Math.max(0.0, Math.min(1.0, (e.clientY - rect.top) / rect.height));
+
+        const mode = drawTypeSelect ? drawTypeSelect.value : "tripwire_crossing";
+        if (mode === "tripwire_crossing") {
+            if (drawnPoints.length >= 2) {
+                drawnPoints = []; // reset if already 2
+            }
+            drawnPoints.push([Math.round(normX * 1000) / 1000, Math.round(normY * 1000) / 1000]);
+        } else {
+            drawnPoints.push([Math.round(normX * 1000) / 1000, Math.round(normY * 1000) / 1000]);
+        }
+
+        updateDrawInfo();
+        renderDrawnGeometry();
+    });
+
+    // CAD-style live hover guide line
+    canvas.addEventListener("mousemove", (e) => {
+        if (!isDrawingMode || drawnPoints.length === 0) return;
+        const rect = canvas.getBoundingClientRect();
+        const normX = Math.max(0.0, Math.min(1.0, (e.clientX - rect.left) / rect.width));
+        const normY = Math.max(0.0, Math.min(1.0, (e.clientY - rect.top) / rect.height));
+        currentHoverPoint = [normX, normY];
+        renderDrawnGeometry();
+    });
+
+    canvas.addEventListener("mouseleave", () => {
+        currentHoverPoint = null;
+        if (isDrawingMode) renderDrawnGeometry();
+    });
+
+    function exitDrawingMode() {
+        isDrawingMode = false;
+        btnToggle.classList.remove("active");
+        toolbar.classList.add("hidden");
+        canvas.classList.remove("drawing-active");
+        drawnPoints = [];
+        currentHoverPoint = null;
+        // Re-render detection overlay
+        renderDrawnGeometry();
+    }
+
+    function updateDrawInfo() {
+        if (!pointsCount) return;
+        const mode = drawTypeSelect ? drawTypeSelect.value : "tripwire_crossing";
+        if (mode === "tripwire_crossing") {
+            pointsCount.textContent = `Tripwire: ${drawnPoints.length}/2 points placed`;
+        } else {
+            pointsCount.textContent = `Polygon: ${drawnPoints.length} points placed (click to add)`;
+        }
+    }
+}
+
+function renderDrawnGeometry() {
+    const canvas = document.getElementById("evidence-canvas");
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+
+    if (!isDrawingMode && drawnPoints.length === 0) {
+        return; // normal detection overlay handles canvas
+    }
+
+    const parent = canvas.parentElement;
+    if (parent && (canvas.width !== parent.clientWidth || canvas.height !== parent.clientHeight)) {
+        canvas.width = parent.clientWidth;
+        canvas.height = parent.clientHeight;
+    }
+
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    const w = canvas.width;
+    const h = canvas.height;
+
+    if (drawnPoints.length === 0) return;
+
+    ctx.save();
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = "#38bdf8";
+    ctx.fillStyle = "rgba(56, 189, 248, 0.25)";
+
+    const mode = document.getElementById("draw-type-select")?.value || "tripwire_crossing";
+
+    if (mode === "tripwire_crossing") {
+        ctx.strokeStyle = "#f59e0b";
+        ctx.beginPath();
+        const p1 = drawnPoints[0];
+        ctx.moveTo(p1[0] * w, p1[1] * h);
+        if (drawnPoints.length > 1) {
+            const p2 = drawnPoints[1];
+            ctx.lineTo(p2[0] * w, p2[1] * h);
+        }
+        ctx.stroke();
+
+        // Draw points
+        drawnPoints.forEach((p, idx) => {
+            ctx.beginPath();
+            ctx.arc(p[0] * w, p[1] * h, 6, 0, Math.PI * 2);
+            ctx.fillStyle = "#ef4444";
+            ctx.fill();
+            ctx.stroke();
+            ctx.fillStyle = "#fff";
+            ctx.font = "bold 12px sans-serif";
+            ctx.fillText(idx === 0 ? "A" : "B", p[0] * w + 8, p[1] * h - 8);
+        });
+
+    } else {
+        // Polygon zone
+        ctx.beginPath();
+        drawnPoints.forEach((p, idx) => {
+            const px = p[0] * w;
+            const py = p[1] * h;
+            if (idx === 0) ctx.moveTo(px, py);
+            else ctx.lineTo(px, py);
+        });
+        if (drawnPoints.length >= 3) {
+            ctx.closePath();
+            ctx.fill();
+        }
+        ctx.stroke();
+
+        // Points
+        drawnPoints.forEach((p, idx) => {
+            ctx.beginPath();
+            ctx.arc(p[0] * w, p[1] * h, 5, 0, Math.PI * 2);
+            ctx.fillStyle = "#38bdf8";
+            ctx.fill();
+            ctx.stroke();
+            ctx.fillStyle = "#fff";
+            ctx.font = "bold 11px sans-serif";
+            ctx.fillText(`${idx + 1}`, p[0] * w + 6, p[1] * h - 6);
+        });
+    }
+
+    // CAD dynamic dashed guide line to mouse cursor
+    if (isDrawingMode && currentHoverPoint && drawnPoints.length > 0) {
+        const lastP = drawnPoints[drawnPoints.length - 1];
+        ctx.beginPath();
+        ctx.setLineDash([5, 5]);
+        ctx.strokeStyle = mode === "tripwire_crossing" ? "rgba(245, 158, 11, 0.75)" : "rgba(56, 189, 248, 0.75)";
+        ctx.lineWidth = 2;
+        ctx.moveTo(lastP[0] * w, lastP[1] * h);
+        ctx.lineTo(currentHoverPoint[0] * w, currentHoverPoint[1] * h);
+        ctx.stroke();
+        ctx.setLineDash([]);
+    }
+
+    ctx.restore();
+}
+
+// 5. Alert Polling & Toast Notifications
+function startAlertsPolling() {
+    setInterval(pollAlerts, 3000);
+}
+
+async function pollAlerts() {
+    try {
+        const res = await fetch("/api/alerts/recent?limit=10");
+        if (!res.ok) return;
+        const recent = await res.json();
+
+        // Count unacknowledged active alerts
+        const activeCount = recent.filter(a => a.status === "active").length;
+        const badge = document.getElementById("alerts-badge-count");
+        if (badge) {
+            if (activeCount > 0) {
+                badge.textContent = activeCount;
+                badge.classList.remove("hidden");
+            } else {
+                badge.classList.add("hidden");
+            }
+        }
+
+        // Fire toast for any brand new alert
+        recent.forEach(a => {
+            if (!knownAlertIds.has(a.id)) {
+                knownAlertIds.add(a.id);
+                if (a.trigger_timestamp > lastKnownAlertTime) {
+                    showToastNotification(a);
+                }
+            }
+        });
+
+        if (recent.length > 0) {
+            const latestTs = Math.max(...recent.map(r => r.trigger_timestamp || 0));
+            if (latestTs > lastKnownAlertTime) {
+                lastKnownAlertTime = latestTs;
+            }
+        }
+
+    } catch (err) {
+        // Silent catch for background poll
+    }
+}
+
+function showToastNotification(alertData) {
+    const container = document.getElementById("toast-container");
+    if (!container) return;
+
+    const toast = document.createElement("div");
+    toast.className = `toast-item toast-${alertData.severity || 'warning'}`;
+    if (alertData.severity === "critical") {
+        toast.style.borderColor = "#ef4444";
+    } else if (alertData.severity === "info") {
+        toast.style.borderColor = "#38bdf8";
+    } else {
+        toast.style.borderColor = "#f59e0b";
+    }
+
+    const titleIcon = alertData.severity === "critical" ? "🚨" : (alertData.severity === "info" ? "ℹ️" : "⚠️");
+
+    toast.innerHTML = `
+        <div class="toast-header">
+            <span class="toast-title">${titleIcon} ${escapeHtml(alertData.rule_name || 'Alert Triggered')}</span>
+            <span style="font-size:0.7rem; color:var(--text-muted);">${escapeHtml(alertData.camera_name || alertData.camera_id || '')}</span>
+        </div>
+        <div class="toast-body">${escapeHtml(alertData.trigger_reason || '')}</div>
+        <div class="toast-footer">
+            ${alertData.id ? `<button class="btn-subtle btn-sm" onclick="acknowledgeAlert('${alertData.id}'); this.closest('.toast-item').remove();">Acknowledge</button>` : ''}
+            <button class="btn-subtle btn-sm" onclick="this.closest('.toast-item').remove();">&times;</button>
+        </div>
+    `;
+
+    container.appendChild(toast);
+
+    // Auto dismiss after 6 seconds
+    setTimeout(() => {
+        if (toast.parentElement) toast.remove();
+    }, 6000);
+}
+
+function showAppToast(title, message, type = "info") {
+    const container = document.getElementById("toast-container");
+    if (!container) return;
+
+    const toast = document.createElement("div");
+    toast.className = `toast-item toast-${type}`;
+    if (type === "success") {
+        toast.style.borderColor = "#10b981";
+        toast.style.boxShadow = "0 8px 25px rgba(0, 0, 0, 0.5), 0 0 15px rgba(16, 185, 129, 0.3)";
+    } else if (type === "error" || type === "critical") {
+        toast.style.borderColor = "#ef4444";
+        toast.style.boxShadow = "0 8px 25px rgba(0, 0, 0, 0.5), 0 0 15px rgba(239, 68, 68, 0.3)";
+    } else if (type === "warning") {
+        toast.style.borderColor = "#f59e0b";
+        toast.style.boxShadow = "0 8px 25px rgba(0, 0, 0, 0.5), 0 0 15px rgba(245, 158, 11, 0.3)";
+    } else {
+        toast.style.borderColor = "#38bdf8";
+        toast.style.boxShadow = "0 8px 25px rgba(0, 0, 0, 0.5), 0 0 15px rgba(56, 189, 248, 0.3)";
+    }
+
+    const icon = type === "success" ? "✅" : (type === "error" || type === "critical" ? "❌" : (type === "warning" ? "⚠️" : "ℹ️"));
+
+    toast.innerHTML = `
+        <div class="toast-header">
+            <span class="toast-title">${icon} ${escapeHtml(title)}</span>
+            <button class="btn-close" style="font-size:1rem; padding:0 4px;" onclick="this.closest('.toast-item').remove();">&times;</button>
+        </div>
+        <div class="toast-body">${escapeHtml(message)}</div>
+    `;
+
+    container.appendChild(toast);
+    setTimeout(() => {
+        if (toast.parentElement) toast.remove();
+    }, 4500);
+}
+
+function setupGlobalModalAndKeyHandlers() {
+    // Backdrop click closes any modal
+    document.querySelectorAll(".modal").forEach(modal => {
+        modal.addEventListener("click", (e) => {
+            if (e.target === modal) {
+                modal.classList.add("hidden");
+            }
+        });
+    });
+
+    // Escape key closes open modals and cancels CAD geometry drawing mode
+    document.addEventListener("keydown", (e) => {
+        if (e.key === "Escape") {
+            const openModals = Array.from(document.querySelectorAll(".modal:not(.hidden)"));
+            if (openModals.length > 0) {
+                openModals.forEach(m => m.classList.add("hidden"));
+                return;
+            }
+            if (typeof isDrawingMode !== "undefined" && isDrawingMode) {
+                const btnCancelDrawing = document.getElementById("btn-cancel-drawing");
+                if (btnCancelDrawing) btnCancelDrawing.click();
+            }
+        }
+    });
+}
+
+let currentView = "overview";
+let currentGridMode = 4;
+let liveDetectionsFilter = "all";
+
+function setupLayoutInteractions() {
+    // 1. Sidebar Navigation
+    const navItems = document.querySelectorAll(".nav-item[data-view]");
+    navItems.forEach(item => {
+        item.addEventListener("click", (e) => {
+            e.preventDefault();
+            const viewName = item.getAttribute("data-view");
+            switchView(viewName);
+        });
+    });
+
+    // 2. Real-time Clock
+    function updateClock() {
+        const clockEl = document.getElementById("realtime-clock");
+        if (clockEl) {
+            const now = new Date();
+            clockEl.textContent = now.toLocaleTimeString();
+        }
+    }
+    updateClock();
+    setInterval(updateClock, 1000);
+
+    // 3. Grid Switcher Buttons in Live Monitoring
+    const gridBtns = document.querySelectorAll(".btn-grid-layout[data-grid]");
+    const matrixGrid = document.getElementById("monitoring-matrix-grid");
+    gridBtns.forEach(btn => {
+        btn.addEventListener("click", () => {
+            gridBtns.forEach(b => b.classList.remove("active"));
+            btn.classList.add("active");
+            const gridNum = parseInt(btn.getAttribute("data-grid"), 10);
+            currentGridMode = gridNum;
+            if (matrixGrid) {
+                matrixGrid.className = `camera-matrix-grid grid-${gridNum}`;
+            }
+            renderMonitoringMatrix();
+        });
+    });
+
+    // Multi-View Batch Connect & Player Mode Controls
+    const btnConnectAll = document.getElementById("btn-connect-all-streams");
+    if (btnConnectAll) {
+        btnConnectAll.addEventListener("click", () => {
+            connectAllVisibleStreams();
+        });
+    }
+
+    const btnToggleMvMode = document.getElementById("btn-toggle-multiview-mode");
+    if (btnToggleMvMode) {
+        btnToggleMvMode.addEventListener("click", () => {
+            toggleMultiviewPlaybackMode();
+        });
+    }
+
+    const btnQuickAdd = document.getElementById("btn-quick-add-stream");
+    if (btnQuickAdd) {
+        btnQuickAdd.addEventListener("click", () => {
+            const m = document.getElementById("connect-modal");
+            if (m) {
+                m.classList.remove("hidden");
+                const sel = document.getElementById("connect-source-type");
+                if (sel) {
+                    sel.value = "youtube_live";
+                    sel.dispatchEvent(new Event("change"));
+                }
+            }
+        });
+    }
+
+    // 4. Live Detections Filter Tabs (Overview & Monitoring)
+    const setupDetTabs = (containerId) => {
+        const container = document.getElementById(containerId) || document.querySelector(`.${containerId}`);
+        if (!container) return;
+        const tabs = container.querySelectorAll(".det-tab-btn");
+        tabs.forEach(tab => {
+            tab.addEventListener("click", () => {
+                const filter = tab.getAttribute("data-filter") || "all";
+                if (window.setLiveDetectionsFilter) {
+                    window.setLiveDetectionsFilter(filter);
+                } else {
+                    liveDetectionsFilter = filter;
+                    loadRecentDetectionsFeed();
+                }
+            });
+        });
+    };
+    setupDetTabs("view-overview");
+    setupDetTabs("monitoring-det-filter-tabs");
+
+    // 5. Global Search Input
+    const globalSearchInput = document.getElementById("global-search-input");
+    if (globalSearchInput) {
+        globalSearchInput.addEventListener("keydown", (e) => {
+            if (e.key === "Enter" && globalSearchInput.value.trim()) {
+                const q = globalSearchInput.value.trim();
+                switchView("ai-search");
+                const queryInput = document.getElementById("query-input");
+                if (queryInput) {
+                    queryInput.value = q;
+                    const queryForm = document.getElementById("query-form");
+                    if (queryForm) queryForm.dispatchEvent(new Event("submit"));
+                }
+            }
+        });
+    }
+
+    // 6. Cross-link Buttons
+    const btnGotoMonitoring = document.getElementById("btn-goto-monitoring");
+    if (btnGotoMonitoring) btnGotoMonitoring.addEventListener("click", () => switchView("live-monitoring"));
+
+    const btnGotoSources = document.getElementById("btn-goto-sources");
+    if (btnGotoSources) btnGotoSources.addEventListener("click", () => switchView("cameras"));
+
+    const btnGotoAlerts = document.getElementById("btn-goto-alerts");
+    if (btnGotoAlerts) btnGotoAlerts.addEventListener("click", () => switchView("alerts"));
+
+    const btnTopAlerts = document.getElementById("btn-top-alerts");
+    if (btnTopAlerts) btnTopAlerts.addEventListener("click", () => switchView("alerts"));
+
+    const btnSettingsReset = document.getElementById("btn-settings-reset");
+    if (btnSettingsReset) {
+        btnSettingsReset.addEventListener("click", () => {
+            const resetModal = document.getElementById("reset-modal");
+            if (resetModal) resetModal.classList.remove("hidden");
+        });
+    }
+
+    const btnRefreshAlertsQueue = document.getElementById("btn-refresh-alerts-queue");
+    if (btnRefreshAlertsQueue) {
+        btnRefreshAlertsQueue.addEventListener("click", () => loadAlertsHub());
+    }
+
+    // Initial data load for overview
+    loadOverviewData();
+    setInterval(loadOverviewData, 5000);
+    startLiveDetectionsPolling();
+}
+
+function switchView(viewName) {
+    currentView = viewName;
+
+    // 1. Update Navigation Item Active Class
+    document.querySelectorAll(".nav-item[data-view]").forEach(item => {
+        if (item.getAttribute("data-view") === viewName) {
+            item.classList.add("active");
+        } else {
+            item.classList.remove("active");
+        }
+    });
+
+    // 2. Update Page Display
+    document.querySelectorAll(".view-page").forEach(page => {
+        page.classList.remove("active-view");
+    });
+    const targetPage = document.getElementById(`view-${viewName}`);
+    if (targetPage) {
+        targetPage.classList.add("active-view");
+    }
+
+    // 3. Update Breadcrumb Title
+    const titleEl = document.getElementById("top-nav-title");
+    const crumbEl = document.getElementById("top-nav-crumb");
+    const viewTitles = {
+        "overview": ["Overview", "Executive Dashboard"],
+        "video-lab": ["Video Intelligence Lab", "Public Video Ingestion & ByteTrack Tracking"],
+        "live-monitoring": ["Live Monitoring", "Multi-Camera Surveillance"],
+        "cameras": ["Cameras & Sources", "Stream Ingestion"],
+        "ai-search": ["AI Search", "Conversational Intelligence"],
+        "events": ["Detection Events", "Historical Forensics"],
+        "alerts": ["Alerts & Tripwires", "Perimeter Security Rules"],
+        "analytics": ["Analytics", "Scene Intelligence & Metrics"],
+        "settings": ["Settings", "Platform Preferences"]
+    };
+    if (viewTitles[viewName] && titleEl && crumbEl) {
+        titleEl.textContent = viewTitles[viewName][0];
+        crumbEl.textContent = viewTitles[viewName][1];
+    }
+
+    // 4. View-specific data triggers
+    if (viewName === "overview") {
+        loadOverviewData();
+    } else if (viewName === "video-lab") {
+        initVideoLabView();
+    } else if (viewName === "live-monitoring") {
+        renderMonitoringMatrix();
+        loadRecentDetectionsFeed();
+    } else if (viewName === "events") {
+        loadEventTimeline();
+    } else if (viewName === "alerts") {
+        loadAlertsHub();
+    } else if (viewName === "cameras") {
+        loadCameras();
+    }
+}
+
+async function loadOverviewData() {
+    try {
+        // 1. Metric: Cameras
+        const resCams = await fetch("/api/cameras");
+        if (resCams.ok) {
+            const cams = await resCams.json();
+            allCameras = cams;
+            const activeCount = cams.filter(c => c.status === "CONNECTED" || c.status === "READY").length;
+            const offlineCount = cams.length - activeCount;
+
+            const elActive = document.getElementById("metric-active-cameras");
+            const elOffline = document.getElementById("metric-offline-cameras");
+            if (elActive) elActive.textContent = activeCount;
+            if (elOffline) elOffline.textContent = offlineCount;
+
+            renderOverviewCameraMatrix(cams);
+            updateOverviewPrimaryVideo(cams);
+        }
+
+        // 2. Metric: Detection Events
+        const resEv = await fetch("/api/events/search?limit=1");
+        if (resEv.ok) {
+            const evData = await resEv.json();
+            const elEvents = document.getElementById("metric-detection-events");
+            if (elEvents) elEvents.textContent = evData.total || 0;
+            const elIndexed = document.getElementById("indexed-events-count");
+            if (elIndexed) elIndexed.textContent = `Events: ${evData.total || 0}`;
+        }
+
+        // 3. Metric: Alerts Status
+        const resAlerts = await fetch("/api/alerts/status");
+        if (resAlerts.ok) {
+            const alertStatus = await resAlerts.json();
+            const critCount = alertStatus.critical || 0;
+            const elCrit = document.getElementById("metric-critical-alerts");
+            if (elCrit) elCrit.textContent = critCount;
+
+            const activeAlerts = alertStatus.active || 0;
+            const sidebarBadge = document.getElementById("sidebar-alert-badge");
+            const topAlertDot = document.getElementById("top-alerts-dot");
+            if (sidebarBadge) {
+                if (activeAlerts > 0) {
+                    sidebarBadge.textContent = activeAlerts;
+                    sidebarBadge.classList.remove("hidden");
+                } else {
+                    sidebarBadge.classList.add("hidden");
+                }
+            }
+            if (topAlertDot) {
+                if (activeAlerts > 0) topAlertDot.classList.remove("hidden");
+                else topAlertDot.classList.add("hidden");
+            }
+        }
+
+        // 4. Metric: Tracked Objects estimate
+        const resTracks = await fetch("/api/cameras/detections/recent");
+        if (resTracks.ok) {
+            const recTracks = await resTracks.json();
+            const trackList = Array.isArray(recTracks) ? recTracks : (recTracks?.detections || []);
+            const uniqueTrackIds = new Set(trackList.map(t => t.track_id).filter(Boolean));
+            const elTracks = document.getElementById("metric-tracked-objects");
+            if (elTracks) elTracks.textContent = Math.max(uniqueTrackIds.size, trackList.length);
+        }
+
+        // 5. Recent Detections Feed
+        await loadRecentDetectionsFeed();
+
+        // 6. Recent Alerts Feed
+        await loadOverviewRecentAlerts();
+    } catch (err) {
+        console.error("Overview data load warning:", err);
+    }
+}
+
+window.selectCamera = async function selectCamera(cameraId) {
+    if (!cameraId) return;
+    activeCameraId = cameraId;
+    const cam = allCameras.find(c => c.id === cameraId);
+    if (!cam) return;
+
+    // 1. Sync Overview Camera Dropdown
+    const camSelect = document.getElementById("overview-camera-select");
+    if (camSelect && camSelect.value !== cameraId) {
+        camSelect.value = cameraId;
+    }
+
+    // 2. Highlight selected card in Overview Matrix
+    const cards = document.querySelectorAll("#overview-camera-matrix .camera-card");
+    cards.forEach(card => {
+        if (card.getAttribute("data-cam-id") === cameraId) {
+            card.classList.add("active");
+            card.style.borderColor = "var(--cyan-primary)";
+            card.style.boxShadow = "0 0 14px rgba(19, 217, 245, 0.3)";
+        } else {
+            card.classList.remove("active");
+            card.style.borderColor = "var(--border-color)";
+            card.style.boxShadow = "none";
+        }
+    });
+
+    // 3. Update Big Screen in Overview
+    updateOverviewPrimaryVideo(allCameras);
+
+    // 4. Update Live Monitoring Primary Card
+    displayLiveCamera(cameraId);
+    renderMonitoringMatrix();
+
+    // 5. If live camera is disconnected, auto-connect in background so tracking starts immediately
+    if ((cam.source_type === "live" || cam.source_type === "youtube_live") && cam.status !== "CONNECTED") {
+        try {
+            fetch("/api/cameras/connect", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    camera_id: cam.id,
+                    name: cam.name,
+                    stream_url: cam.video_path,
+                    source_type: cam.source_type,
+                    record_stream: false,
+                    timeout: cam.source_type === "youtube_live" ? 22.0 : 8.0
+                })
+            }).then(async res => {
+                if (res.ok) {
+                    await loadCameras();
+                    updateOverviewPrimaryVideo(allCameras);
+                    renderMonitoringMatrix();
+                }
+            }).catch(e => console.warn("Auto-connect camera error:", e));
+        } catch (e) {}
+    }
+};
+
+function updateOverviewPrimaryVideo(cams) {
+    if (!cams || cams.length === 0) return;
+    const primary = cams.find(c => c.id === activeCameraId) || cams[0];
+    if (!primary) return;
+
+    const heroTitle = document.getElementById("overview-hero-title");
+    const nameEl = document.getElementById("overview-cam-name");
+    const resEl = document.getElementById("overview-cam-res");
+    const tagEl = document.getElementById("overview-stream-tag");
+    const videoEl = document.getElementById("overview-video");
+    const imgEl = document.getElementById("overview-live-img");
+    const ytIframe = document.getElementById("overview-youtube-iframe");
+    const camSelect = document.getElementById("overview-camera-select");
+
+    if (heroTitle) heroTitle.textContent = `${primary.name || primary.id} (Big Screen View)`;
+    if (nameEl) nameEl.textContent = `CAM: ${primary.name || primary.id}`;
+    if (resEl) resEl.textContent = `${primary.resolution || "1920x1080"} @ ${primary.fps || 30}fps`;
+
+    // Populate or sync camera dropdown
+    if (camSelect) {
+        if (camSelect.options.length !== cams.length) {
+            camSelect.innerHTML = cams.map(c => `
+                <option value="${c.id}" ${c.id === primary.id ? 'selected' : ''}>
+                    ${escapeHtml(c.name || c.id)} (${c.status === 'CONNECTED' ? '● LIVE' : 'OFFLINE'})
+                </option>
+            `).join("");
+            camSelect.onchange = (e) => {
+                window.selectCamera(e.target.value);
+            };
+        } else {
+            camSelect.value = primary.id;
+        }
+    }
+
+    const isConn = primary.status === "CONNECTED";
+    const isYt = primary.source_type === "youtube_live" || Boolean(extractYouTubeVideoId(primary.video_path));
+    const ytId = extractYouTubeVideoId(primary.video_path);
+
+    if (tagEl) {
+        if (isConn) {
+            tagEl.textContent = "● LIVE TRACKING";
+            tagEl.style.color = "var(--emerald-status)";
+            tagEl.style.borderColor = "var(--emerald-status)";
+        } else if (isYt && ytId) {
+            tagEl.textContent = "● YT LIVE";
+            tagEl.style.color = "#ef4444";
+            tagEl.style.borderColor = "#ef4444";
+        } else {
+            tagEl.textContent = primary.status || "OFFLINE";
+            tagEl.style.color = "var(--text-muted)";
+            tagEl.style.borderColor = "var(--border-color)";
+        }
+    }
+
+    // Media element switching for Big Screen
+    if (isYt && ytId) {
+        if (cameraPlayerModes[primary.id] === "ai" && isConn) {
+            if (ytIframe) { ytIframe.src = ""; ytIframe.classList.add("hidden"); }
+            if (videoEl) { videoEl.src = ""; videoEl.classList.add("hidden"); }
+            if (imgEl) {
+                imgEl.src = `/api/cameras/${primary.id}/live?t=${Date.now()}`;
+                imgEl.classList.remove("hidden");
+            }
+        } else {
+            if (imgEl) { imgEl.src = ""; imgEl.classList.add("hidden"); }
+            if (videoEl) { videoEl.src = ""; videoEl.classList.add("hidden"); }
+            if (ytIframe) {
+                const embedUrl = `https://www.youtube-nocookie.com/embed/${ytId}?autoplay=1&mute=1&playsinline=1&enablejsapi=1`;
+                if (ytIframe.src !== embedUrl) {
+                    ytIframe.src = embedUrl;
+                }
+                ytIframe.classList.remove("hidden");
+            }
+        }
+    } else if (isConn) {
+        if (ytIframe) { ytIframe.src = ""; ytIframe.classList.add("hidden"); }
+        if (videoEl) { videoEl.src = ""; videoEl.classList.add("hidden"); }
+        if (imgEl) {
+            imgEl.src = `/api/cameras/${primary.id}/live?t=${Date.now()}`;
+            imgEl.classList.remove("hidden");
+        }
+    } else if (primary.video_path && !primary.video_path.startsWith("http")) {
+        if (ytIframe) { ytIframe.src = ""; ytIframe.classList.add("hidden"); }
+        if (imgEl) { imgEl.src = ""; imgEl.classList.add("hidden"); }
+        if (videoEl) {
+            videoEl.src = primary.video_path;
+            videoEl.classList.remove("hidden");
+            videoEl.play().catch(() => {});
+        }
+    } else {
+        if (ytIframe) { ytIframe.src = ""; ytIframe.classList.add("hidden"); }
+        if (videoEl) { videoEl.src = ""; videoEl.classList.add("hidden"); }
+        if (imgEl) { imgEl.src = ""; imgEl.classList.add("hidden"); }
+    }
+}
+
+function renderOverviewCameraMatrix(cams) {
+    const matrixEl = document.getElementById("overview-camera-matrix");
+    if (!matrixEl) return;
+    if (cams.length === 0) {
+        matrixEl.innerHTML = `<div style="color:var(--text-muted); font-size:0.75rem; padding:12px;">No cameras connected.</div>`;
+        return;
+    }
+
+    matrixEl.innerHTML = cams.map(cam => {
+        const isConn = cam.status === "CONNECTED";
+        const isYt = cam.source_type === "youtube_live";
+        const tag = isYt ? "YT LIVE" : (cam.source_type || "CCTV").toUpperCase();
+        const isSel = cam.id === activeCameraId;
+        return `
+            <div class="camera-card ${isSel ? "active" : ""}" data-cam-id="${cam.id}" onclick="selectCamera('${cam.id}')" style="background:var(--bg-elevated); border:1px solid ${isSel ? 'var(--cyan-primary)' : 'var(--border-color)'}; border-radius:var(--radius-sm); padding:10px 14px; cursor:pointer; transition:all 0.15s ease; box-shadow:${isSel ? '0 0 14px rgba(19, 217, 245, 0.3)' : 'none'};">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+                    <span style="font-weight:700; font-size:0.8rem; color:${isSel ? 'var(--cyan-primary)' : 'var(--text-main)'};">${escapeHtml(cam.name || cam.id)}</span>
+                    <span class="badge-live-tag" style="${isConn ? "background:rgba(0,213,160,0.15); border-color:var(--emerald-status); color:var(--emerald-status);" : "background:rgba(255,65,108,0.15); border-color:var(--red-critical); color:var(--red-critical);"}">
+                        ${isConn ? "● CONNECTED" : "OFFLINE"}
+                    </span>
+                </div>
+                <div style="display:flex; justify-content:space-between; font-size:0.68rem; color:var(--text-muted); font-family:var(--font-mono);">
+                    <span>${tag} • ${cam.resolution || "1920x1080"}</span>
+                    <span>${cam.fps || 30} FPS</span>
+                </div>
+            </div>
+        `;
+    }).join("");
+}
+
+// ============================================================
+// LIVE DETECTIONS PANEL STATE & RENDERING ENGINE
+// ============================================================
+window.liveDetectionsCache = window.liveDetectionsCache || [];
+window.liveDetectionsState = window.liveDetectionsState || "idle"; // 'idle' | 'loading' | 'populated' | 'empty' | 'error' | 'updating'
+let liveDetectionsInFlight = false;
+let liveDetectionsAbortController = null;
+let liveDetectionsPollTimer = null;
+
+function renderLiveDetectionsList() {
+    const overviewEl = document.getElementById("overview-detections-list");
+    const monitoringEl = document.getElementById("monitoring-detections-list");
+    if (!overviewEl && !monitoringEl) return;
+
+    // 1. Initial Loading State (cache is empty)
+    if (liveDetectionsState === "loading" && liveDetectionsCache.length === 0) {
+        const loadingHtml = `
+            <div class="empty-state" style="padding:24px; text-align:center; color:var(--text-muted); font-size:0.75rem;">
+                <span class="spinner-inline" style="margin-right:8px;"></span>
+                Loading live detections...
+            </div>
+        `;
+        if (overviewEl) overviewEl.innerHTML = loadingHtml;
+        if (monitoringEl) monitoringEl.innerHTML = loadingHtml;
+        return;
+    }
+
+    // 2. Error State (cache is empty and fetch failed)
+    if (liveDetectionsState === "error" && liveDetectionsCache.length === 0) {
+        const errorHtml = `
+            <div class="empty-state" style="padding:24px; text-align:center; color:var(--red-critical); font-size:0.75rem;">
+                <div style="margin-bottom:8px; font-weight:600;">⚠️ Unable to load detections</div>
+                <button class="btn-subtle btn-xs" onclick="window.retryLiveDetections()" style="cursor:pointer; color:var(--cyan-primary); border:1px solid var(--border-color); border-radius:var(--radius-xs); padding:4px 12px; background:var(--bg-elevated); font-size:0.72rem;">Retry</button>
+            </div>
+        `;
+        if (overviewEl) overviewEl.innerHTML = errorHtml;
+        if (monitoringEl) monitoringEl.innerHTML = errorHtml;
+        return;
+    }
+
+    // 3. Filter items safely without mutating liveDetectionsCache
+    let items = [...liveDetectionsCache];
+    if (liveDetectionsFilter !== "all") {
+        items = items.filter(d => {
+            const cls = (d.class || d.label || d.concept || "").toLowerCase().trim();
+            const isPerson = (cls === "person" || cls === "pedestrian" || cls === "human");
+            const isVehicle = ["car", "suv", "van", "truck", "bus", "vehicle", "bicycle", "motorcycle", "train"].includes(cls);
+            if (liveDetectionsFilter === "person") return isPerson;
+            if (liveDetectionsFilter === "vehicle") return isVehicle;
+            if (liveDetectionsFilter === "other") return !isPerson && !isVehicle;
+            return true;
+        });
+    }
+
+    // 4. Empty State
+    if (items.length === 0) {
+        const emptyMsg = liveDetectionsCache.length === 0
+            ? "No detections yet."
+            : "No detections in this category.";
+        const emptyHtml = `<div class="empty-state" style="text-align:center; padding:24px; color:var(--text-muted); font-size:0.75rem;">${emptyMsg}</div>`;
+        if (overviewEl) overviewEl.innerHTML = emptyHtml;
+        if (monitoringEl) monitoringEl.innerHTML = emptyHtml;
+        return;
+    }
+
+    // 5. Populated State (renders actual detections)
+    const html = items.slice(0, 25).map(det => {
+        const cls = (det.class || det.label || det.concept || "object").toLowerCase().trim();
+        const isPerson = (cls === "person" || cls === "pedestrian" || cls === "human");
+        const isVeh = ["car", "suv", "van", "truck", "bus", "vehicle", "bicycle", "motorcycle", "train"].includes(cls);
+        const icon = isPerson ? "👤" : (isVeh ? "🚗" : "📦");
+        const iconClass = isPerson ? "class-person" : (isVeh ? "class-car" : "class-other");
+
+        const rawConf = det.confidence ?? det.raw_confidence ?? 0.85;
+        const confPct = Math.min(100, Math.max(1, Math.round(rawConf * 100)));
+        const confColor = confPct >= 75 ? "var(--emerald-status)" : (confPct >= 50 ? "var(--cyan-primary)" : "var(--amber-warning)");
+
+        let timeStr = "--:--:--";
+        if (det.timestamp) {
+            try {
+                timeStr = new Date(det.timestamp * 1000).toLocaleTimeString();
+            } catch (e) {
+                timeStr = "Just now";
+            }
+        }
+
+        const camObj = Array.isArray(allCameras) ? allCameras.find(c => c.id === det.camera_id) : null;
+        const camName = camObj ? (camObj.name || camObj.id) : (det.camera_id || "Camera");
+        const trackStr = det.track_id != null ? `#${det.track_id}` : "--";
+        const thumbUrl = det.thumbnail_url || det.representative_frame || (det.crop_url || null);
+
+        return `
+            <div class="detection-feed-item" onclick="switchView('ai-search');" title="Investigate in AI Search">
+                <div class="det-left-info" style="display:flex; align-items:center; gap:10px;">
+                    ${thumbUrl ? `
+                        <img src="${thumbUrl}" alt="${escapeHtml(cls)}" style="width:32px; height:32px; border-radius:var(--radius-xs); object-fit:cover; border:1px solid var(--border-subtle);" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';" />
+                        <div class="det-class-icon ${iconClass}" style="display:none;">${icon}</div>
+                    ` : `
+                        <div class="det-class-icon ${iconClass}">${icon}</div>
+                    `}
+                    <div class="det-text-meta">
+                        <span class="det-class-title">${escapeHtml(cls)}</span>
+                        <span class="det-sub-source">${escapeHtml(camName)} • Track ${escapeHtml(trackStr)}</span>
+                    </div>
+                </div>
+                <div class="det-right-badges">
+                    <span class="det-time-badge">${escapeHtml(timeStr)}</span>
+                    <span class="det-conf-badge" style="color:${confColor}; border:1px solid ${confColor}40;">${confPct}%</span>
+                </div>
+            </div>
+        `;
+    }).join("");
+
+    if (overviewEl) overviewEl.innerHTML = html;
+    if (monitoringEl) monitoringEl.innerHTML = html;
+}
+
+window.retryLiveDetections = function() {
+    loadRecentDetectionsFeed(true);
+};
+
+window.setLiveDetectionsFilter = function(filter) {
+    liveDetectionsFilter = filter || "all";
+    syncLiveDetectionTabs(liveDetectionsFilter);
+    renderLiveDetectionsList();
+};
+
+function syncLiveDetectionTabs(filter) {
+    document.querySelectorAll(".det-tab-btn").forEach(btn => {
+        if (btn.getAttribute("data-filter") === filter) {
+            btn.classList.add("active");
+        } else {
+            btn.classList.remove("active");
+        }
+    });
+}
+
+async function loadRecentDetectionsFeed(isManualOrRetry = false) {
+    // Avoid overlapping in-flight network requests
+    if (liveDetectionsInFlight) return;
+
+    if (liveDetectionsCache.length === 0 || isManualOrRetry) {
+        liveDetectionsState = "loading";
+        renderLiveDetectionsList();
+    } else {
+        liveDetectionsState = "updating";
+    }
+
+    liveDetectionsInFlight = true;
+
+    // Timeout via AbortController (5000ms max timeout)
+    if (liveDetectionsAbortController) {
+        try { liveDetectionsAbortController.abort(); } catch (_) {}
+    }
+    liveDetectionsAbortController = new AbortController();
+    const timeoutId = setTimeout(() => {
+        if (liveDetectionsAbortController) liveDetectionsAbortController.abort();
+    }, 5000);
+
+    try {
+        const res = await fetch("/api/cameras/detections/recent", {
+            signal: liveDetectionsAbortController.signal
+        });
+        clearTimeout(timeoutId);
+
+        if (!res.ok) {
+            throw new Error(`HTTP ${res.status}`);
+        }
+
+        const data = await res.json();
+        // Support both direct array and wrapped { detections: [...] } formats safely
+        const rawList = Array.isArray(data) ? data : (data?.detections || []);
+
+        // Deduplicate using camera + track_id + rounded timestamp + class
+        const seenKeys = new Set();
+        const deduplicated = [];
+        for (const det of rawList) {
+            const trackKey = det.track_id != null ? String(det.track_id) : "notrack";
+            const timeKey = det.timestamp ? Math.floor(det.timestamp * 10) : "notime";
+            const clsKey = (det.class || det.label || det.concept || "").toLowerCase().trim();
+            const compositeKey = `${det.camera_id || "cam"}_${trackKey}_${timeKey}_${clsKey}`;
+            if (!seenKeys.has(compositeKey)) {
+                seenKeys.add(compositeKey);
+                deduplicated.push(det);
+            }
+        }
+
+        // Sort descending by timestamp (newest first)
+        deduplicated.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+
+        liveDetectionsCache = deduplicated;
+        liveDetectionsState = deduplicated.length > 0 ? "populated" : "empty";
+        renderLiveDetectionsList();
+
+        // Update metric on overview dashboard
+        const elTracks = document.getElementById("metric-tracked-objects");
+        if (elTracks) {
+            const uniqueTrackIds = new Set(deduplicated.map(t => t.track_id).filter(Boolean));
+            elTracks.textContent = Math.max(uniqueTrackIds.size, deduplicated.length);
+        }
+    } catch (err) {
+        if (err.name !== "AbortError") {
+            console.warn("Recent detections load notice:", err);
+        }
+        // If we already have cached items, keep showing them ("updating" without clearing)
+        if (liveDetectionsCache.length === 0) {
+            liveDetectionsState = "error";
+            renderLiveDetectionsList();
+        }
+    } finally {
+        clearTimeout(timeoutId);
+        liveDetectionsInFlight = false;
+        liveDetectionsAbortController = null;
+    }
+}
+
+function startLiveDetectionsPolling() {
+    if (liveDetectionsPollTimer) clearInterval(liveDetectionsPollTimer);
+    liveDetectionsPollTimer = setInterval(() => {
+        if (currentView === "overview" || currentView === "live-monitoring") {
+            loadRecentDetectionsFeed(false);
+        }
+    }, 2500);
+}
+
+function stopLiveDetectionsPolling() {
+    if (liveDetectionsPollTimer) {
+        clearInterval(liveDetectionsPollTimer);
+        liveDetectionsPollTimer = null;
+    }
+}
+window.addEventListener("beforeunload", () => {
+    stopLiveDetectionsPolling();
+});
+
+
+async function loadOverviewRecentAlerts() {
+    const listEl = document.getElementById("overview-recent-alerts");
+    if (!listEl) return;
+
+    try {
+        const res = await fetch("/api/alerts/recent?limit=5");
+        if (!res.ok) return;
+        const alerts = await res.json();
+
+        if (alerts.length === 0) {
+            listEl.innerHTML = `<div style="color:var(--text-muted); font-size:0.75rem; padding:12px; text-align:center;">No recent security alerts. All clear.</div>`;
+            return;
+        }
+
+        listEl.innerHTML = alerts.map(a => {
+            const timeStr = a.trigger_timestamp ? new Date(a.trigger_timestamp * 1000).toLocaleTimeString() : "--:--:--";
+            const sev = (a.severity || "warning").toLowerCase();
+            return `
+                <div style="background:var(--bg-elevated); border:1px solid var(--border-subtle); border-left:3px solid ${sev === "critical" ? "var(--red-critical)" : "var(--amber-warning)"}; border-radius:var(--radius-sm); padding:8px 12px; display:flex; justify-content:space-between; align-items:center;">
+                    <div>
+                        <div style="font-size:0.78rem; font-weight:700; color:var(--text-main);">${escapeHtml(a.rule_name || a.trigger_reason)}</div>
+                        <div style="font-size:0.68rem; color:var(--text-muted); font-family:var(--font-mono);">${escapeHtml(a.camera_id)} • ${timeStr}</div>
+                    </div>
+                    <span class="severity-badge ${sev}">${sev}</span>
+                </div>
+            `;
+        }).join("");
+    } catch (err) {
+        console.error("Overview alerts error:", err);
+    }
+}
+
+function renderMonitoringMatrix() {
+    const grid = document.getElementById("monitoring-matrix-grid");
+    if (!grid) return;
+
+    // Keep primary card
+    const primaryCard = document.getElementById("feed-card-primary");
+    if (currentGridMode === 1) {
+        // Only primary camera
+        grid.innerHTML = "";
+        if (primaryCard) grid.appendChild(primaryCard);
+        return;
+    }
+
+    // Secondary cameras
+    const secondaryCameras = allCameras.filter(c => c.id !== activeCameraId).slice(0, currentGridMode - 1);
+    
+    // Ensure primary card is present
+    grid.innerHTML = "";
+    if (primaryCard) {
+        grid.appendChild(primaryCard);
+        if (activeCameraId) {
+            displayLiveCamera(activeCameraId);
+        }
+    }
+
+    secondaryCameras.forEach(cam => {
+        const card = document.createElement("div");
+        card.className = "camera-feed-card";
+        card.id = `feed-card-${cam.id}`;
+
+        const isLive = cam.source_type === "live" || cam.source_type === "youtube_live";
+        const isYt = cam.source_type === "youtube_live" || Boolean(extractYouTubeVideoId(cam.video_path));
+        const ytId = extractYouTubeVideoId(cam.video_path);
+        const isConn = cam.status === "CONNECTED";
+        const isDirect = isYt ? (cameraPlayerModes[cam.id] !== "ai") : (cameraPlayerModes[cam.id] === "direct");
+
+        let statusBadgeHtml = "";
+        if (isConn) {
+            statusBadgeHtml = `<span class="badge-live-tag" style="background:rgba(0,213,160,0.15); border-color:var(--emerald-status); color:var(--emerald-status);">● LIVE AI</span>`;
+        } else if (isYt && ytId) {
+            statusBadgeHtml = `<span class="badge-live-tag" style="background:rgba(0,213,160,0.15); border-color:var(--emerald-status); color:var(--emerald-status);">● LIVE TRACKING</span>`;
+        } else {
+            statusBadgeHtml = `<span class="badge-live-tag" style="background:rgba(255,65,108,0.15); border-color:var(--red-critical); color:var(--red-critical);">OFFLINE</span>`;
+        }
+
+        let modeToggleBtn = "";
+        if (isYt && ytId) {
+            modeToggleBtn = `
+                <button class="feed-card-btn-action ${isDirect ? 'active' : ''}" data-action="toggle-mode" title="Toggle between direct YouTube embed and live AI detections stream">
+                    ${isDirect ? '📺 Direct' : '🤖 AI'}
+                </button>
+            `;
+        }
+
+        let connectBtn = "";
+        if (isLive) {
+            if (!isConn) {
+                connectBtn = `<button class="feed-card-btn-action connect-btn" data-action="connect" title="Connect to backend YOLO AI tracking">⚡ Connect AI</button>`;
+            } else {
+                connectBtn = `<button class="feed-card-btn-action" data-action="disconnect" style="color:var(--red-critical);" title="Disconnect from AI backend">⏹️ Stop</button>`;
+            }
+        }
+
+        let viewportHtml = "";
+        if (isYt && ytId && isDirect) {
+            viewportHtml = `
+                <iframe id="media-${cam.id}" class="feed-media" src="https://www.youtube-nocookie.com/embed/${ytId}?autoplay=1&mute=1&playsinline=1" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>
+            `;
+        } else if (isConn || (isYt && !isDirect)) {
+            viewportHtml = `
+                <img id="media-${cam.id}" src="/api/cameras/${cam.id}/live" class="feed-media" alt="${escapeHtml(cam.name)}" />
+            `;
+        } else if (cam.video_path && !cam.video_path.startsWith("http")) {
+            viewportHtml = `
+                <video id="media-${cam.id}" class="feed-media" src="${cam.video_path}" autoplay muted loop playsinline></video>
+            `;
+        } else {
+            viewportHtml = `
+                <div class="feed-offline-standby">
+                    <div style="font-size:1.8rem;">📷</div>
+                    <div style="font-weight:700; color:var(--text-main); font-size:0.82rem;">${escapeHtml(cam.name || cam.id)}</div>
+                    <div style="font-size:0.72rem; color:var(--text-muted);">${cam.source_type === 'youtube_live' ? 'YouTube Stream Offline' : 'Camera Disconnected'}</div>
+                    <button class="feed-card-btn-action connect-btn" data-action="connect" style="margin-top:6px; padding:4px 10px; font-size:0.75rem;">⚡ Connect Stream</button>
+                </div>
+            `;
+        }
+
+        card.innerHTML = `
+            <div class="cam-feed-header">
+                <div class="cam-title-info">
+                    <span title="${escapeHtml(cam.name || cam.id)}" style="max-width:140px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${escapeHtml(cam.name || cam.id)}</span>
+                    <span class="cam-meta-pill">${cam.resolution || "1080p"}</span>
+                </div>
+                <div class="cam-feed-actions">
+                    ${modeToggleBtn}
+                    ${connectBtn}
+                    <button class="feed-card-btn-action" data-action="focus" title="Make this primary camera">🔍 Focus</button>
+                    ${statusBadgeHtml}
+                </div>
+            </div>
+            <div class="feed-viewport" id="viewport-${cam.id}">
+                ${viewportHtml}
+                <canvas id="canvas-${cam.id}" class="feed-canvas"></canvas>
+                <div class="feed-overlay-watermark" id="watermark-${cam.id}">
+                    <span id="wm-cam-${cam.id}">CAM: ${escapeHtml(cam.name || cam.id).toUpperCase()}</span>
+                    <span id="wm-time-${cam.id}" style="color:var(--emerald-status);">LIVE TRACKING</span>
+                </div>
+                <div class="feed-hud-verdict-pill hidden" id="hud-${cam.id}" style="font-size:0.68rem; padding:3px 10px; bottom:8px;">
+                    <div style="display:flex; align-items:center; gap:6px;">
+                        <span class="verdict-tag-pill match" style="font-size:0.62rem; padding:2px 6px;">TRACKING</span>
+                        <span id="hud-targets-${cam.id}" style="font-weight:600; color:var(--text-main);">0 TARGETS</span>
+                    </div>
+                    <div style="display:flex; align-items:center; gap:8px; font-family:var(--font-mono); color:var(--text-muted); font-size:0.64rem;">
+                        <div>FPS: <span id="hud-fps-${cam.id}" style="color:var(--emerald-status);">--</span></div>
+                        <div>LAT: <span id="hud-lat-${cam.id}" style="color:var(--cyan-primary);">--ms</span></div>
+                    </div>
+                </div>
+            </div>
+        `;
+
+        // Event bindings
+        const btnMode = card.querySelector('[data-action="toggle-mode"]');
+        if (btnMode) {
+            btnMode.onclick = (e) => {
+                e.stopPropagation();
+                cameraPlayerModes[cam.id] = isDirect ? "ai" : "direct";
+                renderMonitoringMatrix();
+            };
+        }
+
+        const btnConn = card.querySelector('[data-action="connect"]');
+        if (btnConn) {
+            btnConn.onclick = (e) => {
+                e.stopPropagation();
+                reconnectCamera(cam);
+            };
+        }
+
+        const btnDisc = card.querySelector('[data-action="disconnect"]');
+        if (btnDisc) {
+            btnDisc.onclick = (e) => {
+                e.stopPropagation();
+                disconnectCamera(cam.id);
+            };
+        }
+
+        card.style.cursor = "pointer";
+        card.onclick = (e) => {
+            if (e.target.closest("button") || e.target.closest("iframe")) return;
+            selectCamera(cam.id);
+        };
+
+        const btnFocus = card.querySelector('[data-action="focus"]');
+        if (btnFocus) {
+            btnFocus.onclick = (e) => {
+                e.stopPropagation();
+                selectCamera(cam.id);
+            };
+        }
+
+        grid.appendChild(card);
+    });
+
+    // Auto-connect visible cameras in the grid
+    autoConnectVisibleCameras();
+}
+
+let isAutoConnecting = false;
+let autoConnectLastTime = 0;
+
+async function autoConnectVisibleCameras() {
+    const now = Date.now();
+    if (isAutoConnecting || (now - autoConnectLastTime < 6000)) return;
+
+    const visibleCams = [
+        allCameras.find(c => c.id === activeCameraId),
+        ...allCameras.filter(c => c.id !== activeCameraId).slice(0, currentGridMode - 1)
+    ].filter(Boolean);
+
+    const disconnectedLive = visibleCams.filter(c => 
+        (c.source_type === "live" || c.source_type === "youtube_live") && 
+        (!latestMatrixDetections[c.id] || latestMatrixDetections[c.id].status !== "active")
+    );
+
+    if (disconnectedLive.length === 0) return;
+
+    isAutoConnecting = true;
+    autoConnectLastTime = now;
+
+    try {
+        const visibleIds = visibleCams.map(c => c.id);
+        await fetch("/api/cameras/connect-all", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ camera_ids: visibleIds })
+        });
+        await loadCameras();
+    } catch (e) {
+        console.warn("Auto-connect batch warning:", e);
+    } finally {
+        isAutoConnecting = false;
+    }
+}
+
+async function connectAllVisibleStreams() {
+    const visibleCams = [
+        allCameras.find(c => c.id === activeCameraId),
+        ...allCameras.filter(c => c.id !== activeCameraId).slice(0, currentGridMode - 1)
+    ].filter(Boolean);
+
+    const visibleIds = visibleCams.map(c => c.id);
+
+    if (typeof showAppToast === "function") {
+        showAppToast("Connecting Feeds", `Connecting ${visibleCams.length} visible camera feeds to AI in parallel...`, "info");
+    }
+
+    try {
+        const res = await fetch("/api/cameras/connect-all", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ camera_ids: visibleIds })
+        });
+        const data = await res.json();
+        if (typeof showAppToast === "function") {
+            showAppToast("Streams Connected", `All ${data.connected_count || visibleCams.length} feeds connected to AI tracking!`, "success");
+        }
+        await loadCameras();
+        renderMonitoringMatrix();
+        if (activeCameraId) displayLiveCamera(activeCameraId);
+    } catch (err) {
+        console.error("Connect all visible feeds error:", err);
+    }
+}
+
+function toggleMultiviewPlaybackMode() {
+    multiviewDirectYoutube = !multiviewDirectYoutube;
+    const btn = document.getElementById("btn-toggle-multiview-mode");
+    if (btn) {
+        if (multiviewDirectYoutube) {
+            btn.textContent = "🤖 AI Analytics Mode";
+            btn.style.color = "var(--cyan-primary)";
+            btn.style.borderColor = "var(--cyan-primary)";
+            if (typeof showAppToast === "function") {
+                showAppToast("Multi-View Mode", "Playing direct YouTube live streams with zero latency.", "info");
+            }
+        } else {
+            btn.textContent = "📺 Play Direct YouTube";
+            btn.style.color = "";
+            btn.style.borderColor = "";
+            if (typeof showAppToast === "function") {
+                showAppToast("Multi-View Mode", "Displaying AI YOLO tracking streams.", "info");
+            }
+        }
+    }
+    allCameras.forEach(cam => {
+        cameraPlayerModes[cam.id] = multiviewDirectYoutube ? "direct" : "ai";
+    });
+    renderMonitoringMatrix();
+    if (activeCameraId) displayLiveCamera(activeCameraId);
+}
+
+async function loadAlertsHub() {
+    const tbody = document.getElementById("alerts-hub-table-body");
+    const summaryList = document.getElementById("rules-summary-list");
+    const countEl = document.getElementById("rule-count-summary");
+
+    try {
+        // 1. Load alerts
+        const resAlerts = await fetch("/api/alerts?limit=50");
+        if (resAlerts.ok && tbody) {
+            const alerts = await resAlerts.json();
+            if (alerts.length === 0) {
+                tbody.innerHTML = `<tr><td colspan="7" style="text-align:center; padding:24px; color:var(--text-muted);">No active security alerts. System normal.</td></tr>`;
+            } else {
+                tbody.innerHTML = alerts.map(a => {
+                    const timeStr = a.trigger_timestamp ? new Date(a.trigger_timestamp * 1000).toLocaleString() : "--";
+                    const sev = (a.severity || "warning").toLowerCase();
+                    const status = a.status || "active";
+                    const isAck = status === "acknowledged";
+                    const isRes = status === "resolved";
+
+                    return `
+                        <tr>
+                            <td><span class="severity-badge ${sev}">${sev}</span></td>
+                            <td style="font-weight:700; color:var(--text-main);">${escapeHtml(a.rule_name || a.trigger_reason)}</td>
+                            <td>${escapeHtml(a.camera_id)}</td>
+                            <td style="font-family:var(--font-mono); font-size:0.72rem;">${timeStr}</td>
+                            <td>${escapeHtml(a.object_class || "Object")} #${a.track_id || "--"}</td>
+                            <td><span style="font-size:0.7rem; color:${isRes ? "var(--emerald-status)" : (isAck ? "var(--cyan-primary)" : "var(--amber-warning)")}; font-weight:700;">${status.toUpperCase()}</span></td>
+                            <td style="white-space:nowrap;">
+                                ${!isAck && !isRes ? `<button class="btn-table-action" onclick="acknowledgeAlertItem('${a.id}')">Acknowledge</button>` : ""}
+                                ${!isRes ? `<button class="btn-table-action" style="margin-left:4px; border-color:var(--emerald-status);" onclick="resolveAlertItem('${a.id}')">Resolve</button>` : `<span style="color:var(--text-muted); font-size:0.7rem;">✓ Resolved</span>`}
+                            </td>
+                        </tr>
+                    `;
+                }).join("");
+            }
+        }
+
+        // 2. Load rules
+        const resRules = await fetch("/api/alerts/rules");
+        if (resRules.ok && summaryList) {
+            const rules = await resRules.json();
+            if (countEl) countEl.textContent = rules.length;
+            if (rules.length === 0) {
+                summaryList.innerHTML = `<div style="color:var(--text-muted); font-size:0.75rem; padding:12px;">No alert rules configured. Click '+ Configure Alert Rules' above.</div>`;
+            } else {
+                summaryList.innerHTML = rules.map(r => `
+                    <div style="background:var(--bg-elevated); border:1px solid var(--border-subtle); border-radius:var(--radius-sm); padding:10px; display:flex; justify-content:space-between; align-items:center;">
+                        <div>
+                            <div style="font-size:0.8rem; font-weight:700; color:var(--text-main);">${escapeHtml(r.name)}</div>
+                            <div style="font-size:0.68rem; color:var(--text-muted); font-family:var(--font-mono);">${r.rule_type} • ${r.object_class || "any"}</div>
+                        </div>
+                        <span class="severity-badge ${r.severity || "warning"}">${r.severity || "warning"}</span>
+                    </div>
+                `).join("");
+            }
+        }
+    } catch (err) {
+        console.error("Alerts hub load error:", err);
+    }
+}
+
+async function acknowledgeAlertItem(alertId) {
+    try {
+        const res = await fetch(`/api/alerts/${alertId}/acknowledge`, { method: "POST" });
+        if (res.ok) {
+            showAppToast("Alert Acknowledged", `Alert ${alertId.slice(0, 8)} acknowledged.`, "info");
+            loadAlertsHub();
+        }
+    } catch (err) {
+        console.error("Ack error:", err);
+    }
+}
+
+async function resolveAlertItem(alertId) {
+    try {
+        const res = await fetch(`/api/alerts/${alertId}/resolve`, { method: "POST" });
+        if (res.ok) {
+            showAppToast("Alert Resolved", `Alert ${alertId.slice(0, 8)} marked resolved.`, "success");
+            loadAlertsHub();
+        }
+    } catch (err) {
+        console.error("Resolve error:", err);
+    }
+}
+
+// ============================================================
+// 12. VIDEO INTELLIGENCE LAB CONTROLLER
+// ============================================================
+let labCurrentJobId = null;
+let labSelectedFile = null;
+let labPollingInterval = null;
+let labCachedResults = null;
+let labActiveFilter = "all";
+
+function setupVideoLabHandlers() {
+    // 1. Sub-Tab Switcher
+    const tabBtns = document.querySelectorAll(".lab-tab-btn[data-tab]");
+    tabBtns.forEach(btn => {
+        btn.addEventListener("click", () => {
+            const tabName = btn.getAttribute("data-tab");
+            switchLabSubTab(tabName);
+        });
+    });
+
+    // 2. Drag & Drop Zone
+    const dropzone = document.getElementById("lab-dropzone");
+    const fileInput = document.getElementById("lab-file-input");
+    const btnBrowse = document.getElementById("btn-lab-browse");
+    const btnLoadSample = document.getElementById("btn-lab-load-sample");
+    const btnClearFile = document.getElementById("btn-lab-clear-file");
+    const btnStartAnalyze = document.getElementById("btn-lab-start-analyze");
+    const btnCancelJob = document.getElementById("btn-lab-cancel-job");
+    const btnErrorRetry = document.getElementById("btn-lab-error-retry");
+    const btnRefreshHistory = document.getElementById("btn-lab-refresh-history");
+    const btnAnalyzeAnother = document.getElementById("btn-lab-analyze-another");
+
+    if (btnBrowse && fileInput) {
+        btnBrowse.addEventListener("click", (e) => {
+            e.stopPropagation();
+            fileInput.click();
+        });
+    }
+
+    if (dropzone && fileInput) {
+        dropzone.addEventListener("click", (e) => {
+            if (e.target !== btnBrowse && e.target !== btnLoadSample) {
+                fileInput.click();
+            }
+        });
+
+        ["dragenter", "dragover"].forEach(evtName => {
+            dropzone.addEventListener(evtName, (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                dropzone.classList.add("dragging");
+            });
+        });
+
+        ["dragleave", "dragend"].forEach(evtName => {
+            dropzone.addEventListener(evtName, (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                dropzone.classList.remove("dragging");
+            });
+        });
+
+        dropzone.addEventListener("drop", (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            dropzone.classList.remove("dragging");
+            const files = e.dataTransfer.files;
+            if (files && files.length > 0) {
+                handleLabFileSelection(files[0]);
+            }
+        });
+
+        fileInput.addEventListener("change", (e) => {
+            if (fileInput.files && fileInput.files.length > 0) {
+                handleLabFileSelection(fileInput.files[0]);
+            }
+        });
+    }
+
+    // 3. Quick Load Sample CCTV
+    if (btnLoadSample) {
+        btnLoadSample.addEventListener("click", async (e) => {
+            e.stopPropagation();
+            try {
+                showAppToast("Loading Sample", "Fetching bundled pedestrian CCTV video...", "info");
+                // Fetch sample video from server
+                const resp = await fetch("/test_cctv.mp4");
+                if (!resp.ok) {
+                    throw new Error("Could not load sample CCTV file from server");
+                }
+                const blob = await resp.blob();
+                const sampleFile = new File([blob], "cctv_pedestrians_sample.mp4", { type: "video/mp4" });
+                handleLabFileSelection(sampleFile);
+                showAppToast("Sample Loaded", "CCTV sample video loaded into preview deck.", "success");
+            } catch (sampleErr) {
+                console.warn("Sample load error:", sampleErr);
+                showAppToast("Load Error", "Unable to load sample video directly: " + sampleErr.message, "error");
+            }
+        });
+    }
+
+    // 4. Clear File
+    if (btnClearFile) {
+        btnClearFile.addEventListener("click", () => {
+            resetLabFileSelection();
+        });
+    }
+
+    // 5. Start Analysis
+    if (btnStartAnalyze) {
+        btnStartAnalyze.addEventListener("click", () => {
+            startLabVideoAnalysis();
+        });
+    }
+
+    // 6. Cancel Job
+    if (btnCancelJob) {
+        btnCancelJob.addEventListener("click", () => {
+            cancelLabCurrentJob();
+        });
+    }
+
+    // 7. Error Retry
+    if (btnErrorRetry) {
+        btnErrorRetry.addEventListener("click", () => {
+            const errCard = document.getElementById("lab-error-card");
+            if (errCard) errCard.classList.add("hidden");
+            const dropCard = document.querySelector(".lab-dropzone-card");
+            if (dropCard) dropCard.classList.remove("hidden");
+        });
+    }
+
+    // 8. Refresh History
+    if (btnRefreshHistory) {
+        btnRefreshHistory.addEventListener("click", () => {
+            loadLabHistory();
+        });
+    }
+
+    // 9. Analyze Another
+    if (btnAnalyzeAnother) {
+        btnAnalyzeAnother.addEventListener("click", () => {
+            resetLabFileSelection();
+            switchLabSubTab("upload");
+        });
+    }
+
+    // 10. Video Comparison View Modes
+    const btnViewAnnotated = document.getElementById("btn-lab-view-annotated");
+    const btnViewOriginal = document.getElementById("btn-lab-view-original");
+    const btnViewDual = document.getElementById("btn-lab-view-dual");
+    const wrapAnnotated = document.getElementById("wrap-player-annotated");
+    const wrapOriginal = document.getElementById("wrap-player-original");
+    const playersGrid = document.getElementById("lab-players-grid");
+
+    const clearModeActive = () => {
+        [btnViewAnnotated, btnViewOriginal, btnViewDual].forEach(b => b && b.classList.remove("active"));
+    };
+
+    if (btnViewAnnotated) {
+        btnViewAnnotated.addEventListener("click", () => {
+            clearModeActive();
+            btnViewAnnotated.classList.add("active");
+            if (wrapAnnotated) wrapAnnotated.classList.remove("hidden");
+            if (wrapOriginal) wrapOriginal.classList.add("hidden");
+            if (playersGrid) playersGrid.classList.remove("dual-view");
+        });
+    }
+
+    if (btnViewOriginal) {
+        btnViewOriginal.addEventListener("click", () => {
+            clearModeActive();
+            btnViewOriginal.classList.add("active");
+            if (wrapAnnotated) wrapAnnotated.classList.add("hidden");
+            if (wrapOriginal) wrapOriginal.classList.remove("hidden");
+            if (playersGrid) playersGrid.classList.remove("dual-view");
+        });
+    }
+
+    if (btnViewDual) {
+        btnViewDual.addEventListener("click", () => {
+            clearModeActive();
+            btnViewDual.classList.add("active");
+            if (wrapAnnotated) wrapAnnotated.classList.remove("hidden");
+            if (wrapOriginal) wrapOriginal.classList.remove("hidden");
+            if (playersGrid) playersGrid.classList.add("dual-view");
+        });
+    }
+
+    // 11. Timeline Category Filter Tabs
+    const filterTabs = document.querySelectorAll(".lab-filter-tab[data-filter]");
+    filterTabs.forEach(tab => {
+        tab.addEventListener("click", () => {
+            filterTabs.forEach(t => t.classList.remove("active"));
+            tab.classList.add("active");
+            labActiveFilter = tab.getAttribute("data-filter") || "all";
+            if (labCachedResults && labCachedResults.detections) {
+                renderLabTimeline(labCachedResults.detections, labActiveFilter);
+            }
+        });
+    });
+}
+
+function initVideoLabView() {
+    loadLabHistory();
+}
+
+function switchLabSubTab(tabName) {
+    document.querySelectorAll(".lab-tab-btn[data-tab]").forEach(btn => {
+        if (btn.getAttribute("data-tab") === tabName) {
+            btn.classList.add("active");
+        } else {
+            btn.classList.remove("active");
+        }
+    });
+
+    document.querySelectorAll(".lab-pane").forEach(pane => {
+        pane.classList.add("hidden");
+        pane.classList.remove("active-pane");
+    });
+
+    const target = document.getElementById(`lab-pane-${tabName}`);
+    if (target) {
+        target.classList.remove("hidden");
+        target.classList.add("active-pane");
+    }
+
+    if (tabName === "history") {
+        loadLabHistory();
+    }
+}
+
+function handleLabFileSelection(file) {
+    if (!file) return;
+
+    // Validate size (< 250 MB)
+    const maxBytes = 250 * 1024 * 1024;
+    if (file.size > maxBytes) {
+        showAppToast("File Too Large", `Selected file (${(file.size / (1024*1024)).toFixed(1)} MB) exceeds 250 MB limit.`, "error");
+        return;
+    }
+
+    // Validate format
+    const name = file.name.toLowerCase();
+    const validExts = [".mp4", ".mov", ".mkv", ".avi", ".webm"];
+    const hasValidExt = validExts.some(ext => name.endsWith(ext));
+    if (!hasValidExt) {
+        showAppToast("Unsupported Format", `Please upload a supported video container: ${validExts.join(", ")}`, "error");
+        return;
+    }
+
+    labSelectedFile = file;
+
+    // Populate metadata
+    const nameEl = document.getElementById("lab-meta-filename");
+    const sizeEl = document.getElementById("lab-meta-filesize");
+    const durEl = document.getElementById("lab-meta-duration");
+    const resEl = document.getElementById("lab-meta-resolution");
+
+    if (nameEl) nameEl.textContent = file.name;
+    if (sizeEl) sizeEl.textContent = `${(file.size / (1024 * 1024)).toFixed(2)} MB`;
+    if (durEl) durEl.textContent = "Inspecting...";
+    if (resEl) resEl.textContent = "Inspecting...";
+
+    // Show preview video
+    const previewVideo = document.getElementById("lab-local-preview");
+    if (previewVideo) {
+        const fileUrl = URL.createObjectURL(file);
+        previewVideo.src = fileUrl;
+        previewVideo.onloadedmetadata = () => {
+            const d = previewVideo.duration;
+            const w = previewVideo.videoWidth;
+            const h = previewVideo.videoHeight;
+            if (durEl) {
+                const mins = Math.floor(d / 60);
+                const secs = Math.floor(d % 60);
+                durEl.textContent = `${mins}:${secs < 10 ? '0' : ''}${secs} (${d.toFixed(1)}s)`;
+            }
+            if (resEl) resEl.textContent = `${w} × ${h}`;
+        };
+    }
+
+    // Show preview card, hide dropzone
+    const previewCard = document.getElementById("lab-file-preview-card");
+    const dropzoneCard = document.querySelector(".lab-dropzone-card");
+    if (previewCard) previewCard.classList.remove("hidden");
+    if (dropzoneCard) dropzoneCard.classList.add("hidden");
+
+    showAppToast("Video Ready", `${file.name} ready for AI analysis.`, "info");
+}
+
+function resetLabFileSelection() {
+    labSelectedFile = null;
+    const fileInput = document.getElementById("lab-file-input");
+    if (fileInput) fileInput.value = "";
+
+    const previewVideo = document.getElementById("lab-local-preview");
+    if (previewVideo) {
+        previewVideo.pause();
+        previewVideo.removeAttribute("src");
+        previewVideo.load();
+    }
+
+    const previewCard = document.getElementById("lab-file-preview-card");
+    const dropzoneCard = document.querySelector(".lab-dropzone-card");
+    const procCard = document.getElementById("lab-processing-card");
+    const errCard = document.getElementById("lab-error-card");
+
+    if (previewCard) previewCard.classList.add("hidden");
+    if (dropzoneCard) dropzoneCard.classList.remove("hidden");
+    if (procCard) procCard.classList.add("hidden");
+    if (errCard) errCard.classList.add("hidden");
+}
+
+async function startLabVideoAnalysis() {
+    if (!labSelectedFile) {
+        showAppToast("No File Selected", "Please select a CCTV video file to analyze.", "error");
+        return;
+    }
+
+    const previewCard = document.getElementById("lab-file-preview-card");
+    const procCard = document.getElementById("lab-processing-card");
+    const errCard = document.getElementById("lab-error-card");
+
+    if (previewCard) previewCard.classList.add("hidden");
+    if (errCard) errCard.classList.add("hidden");
+    if (procCard) procCard.classList.remove("hidden");
+
+    // Get sampling interval
+    let interval = 15;
+    const samplingChecked = document.querySelector("input[name='lab-sampling']:checked");
+    if (samplingChecked) {
+        interval = parseInt(samplingChecked.value, 10) || 15;
+    }
+
+    updateLabProgressUI({
+        progress_pct: 5,
+        stage: "Uploading video to persistent storage & verifying binary signatures...",
+        frames_analyzed: 0,
+        total_frames: 0,
+        unique_tracks_count: 0,
+        total_detections_count: 0
+    });
+
+    try {
+        const formData = new FormData();
+        formData.append("file", labSelectedFile);
+        formData.append("frame_interval", interval);
+        formData.append("session_id", "web_" + Date.now());
+
+        const res = await fetch("/api/lab/upload-and-analyze", {
+            method: "POST",
+            body: formData
+        });
+
+        if (!res.ok) {
+            const errJson = await res.json().catch(() => ({}));
+            throw new Error(errJson.detail || "Upload & analysis initiation failed");
+        }
+
+        const data = await res.json();
+        labCurrentJobId = data.job_id;
+
+        showAppToast("Analysis Initiated", `Job ${labCurrentJobId.slice(0, 8)} started in background worker.`, "info");
+        pollLabJob(labCurrentJobId);
+
+    } catch (err) {
+        console.error("Lab upload error:", err);
+        if (procCard) procCard.classList.add("hidden");
+        if (errCard) errCard.classList.remove("hidden");
+        const errMsgEl = document.getElementById("lab-error-msg");
+        if (errMsgEl) errMsgEl.textContent = err.message || "Failed to start analysis.";
+        showAppToast("Analysis Failed", err.message, "error");
+    }
+}
+
+function pollLabJob(jobId) {
+    if (labPollingInterval) clearInterval(labPollingInterval);
+
+    labPollingInterval = setInterval(async () => {
+        try {
+            const res = await fetch(`/api/lab/jobs/${jobId}/status`);
+            if (!res.ok) return;
+
+            const st = await res.json();
+            updateLabProgressUI(st);
+
+            if (st.status === "completed") {
+                clearInterval(labPollingInterval);
+                labPollingInterval = null;
+                showAppToast("Analysis Completed", "YOLO-World & ByteTrack tracking complete!", "success");
+
+                const badge = document.getElementById("lab-active-job-badge");
+                if (badge) badge.classList.remove("hidden");
+
+                setTimeout(() => {
+                    loadLabResults(jobId);
+                }, 400);
+
+            } else if (st.status === "failed") {
+                clearInterval(labPollingInterval);
+                labPollingInterval = null;
+                const procCard = document.getElementById("lab-processing-card");
+                const errCard = document.getElementById("lab-error-card");
+                if (procCard) procCard.classList.add("hidden");
+                if (errCard) errCard.classList.remove("hidden");
+                const errMsgEl = document.getElementById("lab-error-msg");
+                if (errMsgEl) errMsgEl.textContent = st.error_message || "Video analysis encountered an error.";
+                showAppToast("Analysis Error", st.error_message || "Video processing failed", "error");
+
+            } else if (st.status === "cancelled") {
+                clearInterval(labPollingInterval);
+                labPollingInterval = null;
+                showAppToast("Analysis Cancelled", "Job was cancelled.", "info");
+                resetLabFileSelection();
+            }
+
+        } catch (pollErr) {
+            console.warn("Poll error:", pollErr);
+        }
+    }, 700);
+}
+
+function updateLabProgressUI(st) {
+    const pct = Math.min(100, Math.max(0, st.progress_pct || 0));
+    const fillEl = document.getElementById("lab-progress-bar");
+    const pctEl = document.getElementById("lab-progress-pct");
+    const stageEl = document.getElementById("lab-stage-text");
+    const framesEl = document.getElementById("lab-stat-frames");
+    const tracksEl = document.getElementById("lab-stat-tracks");
+    const detsEl = document.getElementById("lab-stat-detections");
+
+    if (fillEl) fillEl.style.width = `${pct}%`;
+    if (pctEl) pctEl.textContent = `${pct.toFixed(0)}%`;
+    if (stageEl) stageEl.textContent = st.stage || "Processing video frames...";
+    if (framesEl) framesEl.textContent = `${st.current_frame || 0} / ${st.total_frames || 0}`;
+    if (tracksEl) tracksEl.textContent = `${st.unique_tracks_count || 0}`;
+    if (detsEl) detsEl.textContent = `${st.total_detections_count || 0}`;
+}
+
+async function cancelLabCurrentJob() {
+    if (!labCurrentJobId) return;
+    try {
+        await fetch(`/api/lab/jobs/${labCurrentJobId}/cancel`, { method: "POST" });
+        showAppToast("Cancelling", "Requested job cancellation...", "info");
+    } catch (err) {
+        console.error("Cancel error:", err);
+    }
+}
+
+async function loadLabResults(jobId) {
+    try {
+        const res = await fetch(`/api/lab/jobs/${jobId}/results`);
+        if (!res.ok) throw new Error("Failed to load results for job " + jobId);
+
+        const data = await res.json();
+        labCachedResults = data;
+        labCurrentJobId = jobId;
+
+        // Populate Top Header Meta
+        const fnEl = document.getElementById("lab-res-filename");
+        const stEl = document.getElementById("lab-res-status");
+        const durEl = document.getElementById("lab-res-duration");
+        const resEl = document.getElementById("lab-res-resolution");
+        const fpsEl = document.getElementById("lab-res-fps");
+
+        if (fnEl) fnEl.textContent = data.filename || "CCTV Analysis";
+        if (stEl) stEl.textContent = (data.status || "COMPLETED").toUpperCase();
+        if (durEl) durEl.textContent = `${data.duration || 0}s`;
+        if (resEl) resEl.textContent = data.resolution || "--";
+        if (fpsEl) fpsEl.textContent = `${data.fps || 0} FPS`;
+
+        // Set Video URLs
+        const vAnnotated = document.getElementById("lab-video-annotated");
+        const vOriginal = document.getElementById("lab-video-original");
+
+        if (vAnnotated && data.annotated_video_url) {
+            vAnnotated.src = data.annotated_video_url;
+            vAnnotated.load();
+        }
+        if (vOriginal && data.original_video_url) {
+            vOriginal.src = data.original_video_url;
+            vOriginal.load();
+        }
+
+        // Set Download Links
+        const dlVideo = document.getElementById("btn-lab-dl-video");
+        const dlJson = document.getElementById("btn-lab-dl-json");
+        const dlCsv = document.getElementById("btn-lab-dl-csv");
+
+        if (dlVideo) dlVideo.href = data.annotated_video_download_url;
+        if (dlJson) dlJson.href = data.json_results_url;
+        if (dlCsv) dlCsv.href = data.csv_results_url;
+
+        // Set Key Metrics
+        const tracksCountEl = document.getElementById("lab-res-unique-tracks");
+        const detsCountEl = document.getElementById("lab-res-total-detections");
+        const clsCountEl = document.getElementById("lab-res-classes-count");
+        const framesRatioEl = document.getElementById("lab-res-frames-ratio");
+
+        const m = data.metrics || {};
+        if (tracksCountEl) tracksCountEl.textContent = m.unique_tracks_count || 0;
+        if (detsCountEl) detsCountEl.textContent = m.total_detections_count || 0;
+
+        const classMap = m.class_counts || {};
+        const classKeys = Object.keys(classMap);
+        if (clsCountEl) clsCountEl.textContent = classKeys.length;
+        if (framesRatioEl) framesRatioEl.textContent = `${m.frames_analyzed || 0} / ${m.total_frames || 0}`;
+
+        // Populate Class Pills
+        const pillsContainer = document.getElementById("lab-class-pills");
+        if (pillsContainer) {
+            if (classKeys.length === 0) {
+                pillsContainer.innerHTML = '<span class="lab-pill" style="color:var(--text-muted);">No objects detected.</span>';
+            } else {
+                pillsContainer.innerHTML = classKeys.map(k => `
+                    <div class="lab-class-badge">
+                        <span style="text-transform:capitalize; font-weight:600;">${escapeHtml(k)}</span>
+                        <span class="lab-class-count">${classMap[k]}</span>
+                    </div>
+                `).join("");
+            }
+        }
+
+        // Render Timeline
+        labActiveFilter = "all";
+        renderLabTimeline(data.detections || [], "all");
+
+        // Render Evidence Keyframes
+        renderLabEvidenceGallery(data.summary?.tracks || []);
+
+        // Switch to Results sub-tab
+        switchLabSubTab("results");
+
+    } catch (err) {
+        console.error("Load results error:", err);
+        showAppToast("Error", "Could not load tracking results: " + err.message, "error");
+    }
+}
+
+function renderLabTimeline(detections, filter) {
+    const listEl = document.getElementById("lab-timeline-scroll");
+    const countEl = document.getElementById("lab-timeline-count");
+    if (!listEl) return;
+
+    let filtered = detections;
+    if (filter === "person") {
+        filtered = detections.filter(d => d.label === "person");
+    } else if (filter === "vehicle") {
+        filtered = detections.filter(d => ["car", "suv", "van", "truck", "bus", "vehicle", "motorcycle", "bicycle"].includes(d.label));
+    } else if (filter === "other") {
+        filtered = detections.filter(d => d.label !== "person" && !["car", "suv", "van", "truck", "bus", "vehicle", "motorcycle", "bicycle"].includes(d.label));
+    }
+
+    if (countEl) countEl.textContent = `${filtered.length} Events`;
+
+    if (!filtered || filtered.length === 0) {
+        listEl.innerHTML = `<div class="empty-state-card" style="grid-column:1/-1;">No detection events match the '${escapeHtml(filter)}' filter.</div>`;
+        return;
+    }
+
+    listEl.innerHTML = filtered.map(d => {
+        const offset = d.timestamp_offset || 0;
+        const mins = Math.floor(offset / 60);
+        const secs = (offset % 60).toFixed(2);
+        const tsFormatted = `${mins}:${secs < 10 ? '0' : ''}${secs}`;
+        const tid = d.tracking_id !== null ? `Track #${d.tracking_id}` : 'Untracked';
+        const confPct = Math.round((d.confidence || 0) * 100);
+        const thumb = d.evidence_url || 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="60" height="48" fill="%23193454"><rect width="100%" height="100%"/></svg>';
+
+        return `
+            <div class="lab-event-card" data-seek="${offset}" title="Click to seek video to ${tsFormatted}">
+                <img src="${escapeHtml(thumb)}" class="lab-event-thumb" alt="${escapeHtml(d.label)}" loading="lazy" />
+                <div class="lab-event-info">
+                    <div class="lab-event-top">
+                        <span class="lab-seek-chip">▶ ${tsFormatted}</span>
+                        <span class="lab-tid-pill">${escapeHtml(tid)}</span>
+                    </div>
+                    <div class="lab-event-bottom">
+                        <span class="lab-cls-name">${escapeHtml(d.label)}</span>
+                        <span class="lab-conf-val">${confPct}% conf</span>
+                    </div>
+                </div>
+            </div>
+        `;
+    }).join("");
+
+    // Attach click seekers
+    listEl.querySelectorAll(".lab-event-card[data-seek]").forEach(card => {
+        card.addEventListener("click", () => {
+            const seekTime = parseFloat(card.getAttribute("data-seek")) || 0;
+            const vAnnotated = document.getElementById("lab-video-annotated");
+            const vOriginal = document.getElementById("lab-video-original");
+
+            if (vAnnotated) {
+                vAnnotated.currentTime = seekTime;
+                vAnnotated.play().catch(() => {});
+            }
+            if (vOriginal) {
+                vOriginal.currentTime = seekTime;
+                vOriginal.play().catch(() => {});
+            }
+
+            showAppToast("Seeking Video", `Jumped to timestamp ${seekTime.toFixed(2)}s`, "info");
+        });
+    });
+}
+
+function renderLabEvidenceGallery(tracks) {
+    const galleryEl = document.getElementById("lab-evidence-grid");
+    if (!galleryEl) return;
+
+    if (!tracks || tracks.length === 0) {
+        galleryEl.innerHTML = '<div class="empty-state-card" style="grid-column:1/-1;">No unique tracked keyframe crops extracted.</div>';
+        return;
+    }
+
+    galleryEl.innerHTML = tracks.map(t => {
+        const thumb = t.evidence_url || 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="120" height="90" fill="%23193454"><rect width="100%" height="100%"/></svg>';
+        return `
+            <div class="lab-evidence-card">
+                <img src="${escapeHtml(thumb)}" class="lab-evidence-img" alt="Track ID ${t.tracking_id}" loading="lazy" />
+                <div class="lab-evidence-caption">
+                    <div style="color:var(--cyan-primary);">ID #${t.tracking_id} • ${escapeHtml(t.label)}</div>
+                    <div style="font-size:0.65rem; color:var(--text-muted); font-family:var(--font-mono);">${t.first_seen}s - ${t.last_seen}s</div>
+                </div>
+            </div>
+        `;
+    }).join("");
+}
+
+async function loadLabHistory() {
+    const tbody = document.getElementById("lab-history-tbody");
+    const countBadge = document.getElementById("lab-history-count");
+    if (!tbody) return;
+
+    try {
+        const res = await fetch("/api/lab/jobs?limit=50");
+        if (!res.ok) throw new Error("Could not load jobs history");
+
+        const jobs = await res.json();
+        if (countBadge) countBadge.textContent = jobs.length;
+
+        if (!jobs || jobs.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="8" style="text-align:center; color:var(--text-muted); padding:20px;">No analysis jobs found. Upload a CCTV video to begin.</td></tr>';
+            return;
+        }
+
+        tbody.innerHTML = jobs.map(j => {
+            const dateStr = j.created_at ? new Date(j.created_at * 1000).toLocaleString() : '--';
+            const dur = j.duration ? `${j.duration.toFixed(1)}s` : '--';
+            const res = j.resolution || '--';
+            const tracks = j.unique_tracks_count || 0;
+            const dets = j.total_detections_count || 0;
+            const st = (j.status || 'unknown').toLowerCase();
+            const badgeClass = st === 'completed' ? 'chip-status-ready' : (st === 'processing' ? 'chip-meta' : 'chip-meta');
+
+            return `
+                <tr>
+                    <td style="font-weight:600; color:var(--text-main);">${escapeHtml(j.filename)}</td>
+                    <td style="font-size:0.75rem; color:var(--text-muted); font-family:var(--font-mono);">${dateStr}</td>
+                    <td style="font-family:var(--font-mono);">${dur}</td>
+                    <td style="font-family:var(--font-mono);">${res}</td>
+                    <td><span class="${badgeClass}">${st.toUpperCase()}</span></td>
+                    <td style="font-weight:700; color:var(--cyan-primary); font-family:var(--font-mono);">${tracks}</td>
+                    <td style="font-family:var(--font-mono);">${dets}</td>
+                    <td>
+                        <div style="display:flex; gap:6px;">
+                            <button class="btn-primary btn-sm btn-lab-view-job" data-id="${j.id}">View Results</button>
+                            <button class="btn-danger btn-sm btn-lab-delete-job" data-id="${j.id}" data-name="${escapeHtml(j.filename)}">Delete</button>
+                        </div>
+                    </td>
+                </tr>
+            `;
+        }).join("");
+
+        // Attach action handlers
+        tbody.querySelectorAll(".btn-lab-view-job").forEach(btn => {
+            btn.addEventListener("click", () => {
+                const jobId = btn.getAttribute("data-id");
+                loadLabResults(jobId);
+            });
+        });
+
+        tbody.querySelectorAll(".btn-lab-delete-job").forEach(btn => {
+            btn.addEventListener("click", () => {
+                const jobId = btn.getAttribute("data-id");
+                const jobName = btn.getAttribute("data-name") || "this video";
+                if (confirm(`Are you sure you want to permanently delete analysis job for '${jobName}' and purge all stored files?`)) {
+                    deleteLabJob(jobId);
+                }
+            });
+        });
+
+    } catch (err) {
+        console.error("History error:", err);
+        tbody.innerHTML = `<tr><td colspan="8" style="text-align:center; color:var(--red-critical);">Failed to load history: ${escapeHtml(err.message)}</td></tr>`;
+    }
+}
+
+async function deleteLabJob(jobId) {
+    try {
+        const res = await fetch(`/api/lab/jobs/${jobId}`, { method: "DELETE" });
+        if (!res.ok) throw new Error("Delete failed");
+        showAppToast("Deleted", "Job and associated stored files permanently deleted.", "info");
+        loadLabHistory();
+        if (labCurrentJobId === jobId) {
+            labCurrentJobId = null;
+            resetLabFileSelection();
+            switchLabSubTab("upload");
+        }
+    } catch (err) {
+        showAppToast("Error", "Could not delete job: " + err.message, "error");
+    }
+}
+
+
+
+
+

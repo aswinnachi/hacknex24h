@@ -1,0 +1,25 @@
+{
+  "version": 2,
+  "name": "ai-vision-security",
+  "cleanUrls": true,
+  "builds": [
+    {
+      "src": "frontend/**",
+      "use": "@vercel/static"
+    }
+  ],
+  "routes": [
+    {
+      "src": "/api/(.*)",
+      "dest": "https://YOUR_BACKEND_URL/api/$1"
+    },
+    {
+      "src": "/data/(.*)",
+      "dest": "https://YOUR_BACKEND_URL/data/$1"
+    },
+    {
+      "src": "/(.*)",
+      "dest": "/frontend/$1"
+    }
+  ]
+}

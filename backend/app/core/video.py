@@ -1,5 +1,6 @@
 import cv2
 import os
+import time
 import uuid
 import json
 import threading
@@ -8,7 +9,7 @@ from typing import Dict, Any, List, Optional
 from backend.app.core.logging import logger
 
 from backend.app.db.database import execute_query
-from backend.app.core.detector import get_detector, save_track_event
+from backend.app.core.detector import get_detector, save_track_event, DEFAULT_CLASSES
 from backend.app.core.attributes import (
     analyze_crop_color,
     analyze_track_movement,
@@ -79,10 +80,7 @@ def process_video_job(job_id: str, camera_id: str, video_path: str, frame_interv
         frames_analyzed = 0
         
         detector = get_detector()
-        detection_classes = [
-            "person", "car", "suv", "van", "motorcycle", "scooter", "bicycle", "truck", "bus", "vehicle", "traffic light",
-            "bag", "backpack", "handbag", "suitcase", "umbrella", "phone", "bottle"
-        ]
+        detection_classes = DEFAULT_CLASSES
         
         active_tracks = {}
         MAX_LOST_FRAMES = 25 # Tolerance for lost tracking
@@ -108,7 +106,14 @@ def process_video_job(job_id: str, camera_id: str, video_path: str, frame_interv
                 timestamp = current_frame / fps if fps > 0 else 0.0
                 
                 if detector and detector.available:
-                    detections = detector.track_frame(frame, detection_classes, conf_threshold=0.15)
+                    detections = detector.track_frame(
+                        frame=frame,
+                        classes=DEFAULT_CLASSES,
+                        conf_threshold=0.15,
+                        camera_id=camera_id,
+                        is_live=False
+                    )
+                    time.sleep(0.005) # Cooperative yield for live camera streams
                     seen_track_ids = set()
                     
                     # Separate non-person accessory detections in this frame for spatial association
@@ -121,10 +126,14 @@ def process_video_job(job_id: str, camera_id: str, video_path: str, frame_interv
                                 tid = det_idx + 1
                                 
                             raw_label = det["label"]
-                            if raw_label in ("suv", "van", "vehicle"):
+                            if raw_label in ("suv", "sedan", "automobile"):
                                 label = "car"
-                            elif raw_label in ("scooter", "motorbike"):
+                            elif raw_label in ("scooter", "motorbike", "moped"):
                                 label = "motorcycle"
+                            elif raw_label in ("pickup", "lorry"):
+                                label = "truck"
+                            elif raw_label in ("bike", "cycle"):
+                                label = "bicycle"
                             else:
                                 label = raw_label
                             bbox = det["bbox"]
@@ -362,10 +371,13 @@ def generate_video_analysis_summary(
     """
     file_name = os.path.basename(video_path)
     
-    # Categorize objects
+    # Categorize objects strictly by canonical class
     person_tracks = [t for t in tracks if t["label"] == "person"]
-    car_tracks = [t for t in tracks if t["label"] in ("car", "truck", "bus", "white vehicle")]
-    motorcycle_tracks = [t for t in tracks if t["label"] in ("motorcycle", "bicycle")]
+    car_tracks = [t for t in tracks if t["label"] in ("car", "automobile", "sedan", "suv")]
+    bus_tracks = [t for t in tracks if t["label"] in ("bus", "buses")]
+    truck_tracks = [t for t in tracks if t["label"] in ("truck", "trucks", "lorry", "pickup")]
+    motorcycle_tracks = [t for t in tracks if t["label"] in ("motorcycle", "motorbike", "moped", "scooter")]
+    bicycle_tracks = [t for t in tracks if t["label"] in ("bicycle", "bike", "cycle")]
     bag_tracks = [t for t in tracks if t["label"] in ("bag", "backpack", "suitcase") or t["attributes"].get("has_bag")]
     
     persons_summary = []

@@ -48,7 +48,8 @@ def are_colors_compatible(req_color: Optional[str], cand_color: Optional[str]) -
 
 def validate_candidate_event(event_dict: Dict[str, Any], camera_id: Optional[str] = None) -> Tuple[bool, str]:
     """
-    Hard verification of data lifecycle, camera consistency, dataset ID, and video timestamp boundaries.
+    Hard verification of data lifecycle, camera consistency, dataset ID, video timestamp boundaries,
+    and visual evidence file existence.
     """
     cam_id = event_dict.get("camera_id")
     if not cam_id:
@@ -56,25 +57,49 @@ def validate_candidate_event(event_dict: Dict[str, Any], camera_id: Optional[str
     if camera_id and cam_id != camera_id:
         return False, f"Camera mismatch: {cam_id} != {camera_id}"
 
-    cam = execute_query("SELECT id, dataset_id, duration, status FROM cameras WHERE id = ?", (cam_id,), fetch=True, fetch_one=True)
+    cam = execute_query("SELECT id, dataset_id, duration, status, video_path, source_type FROM cameras WHERE id = ?", (cam_id,), fetch=True, fetch_one=True)
     if not cam:
         return False, f"Camera {cam_id} does not exist in database"
 
     cam_dict = dict(cam)
-    # Check dataset_id matches camera's active dataset_id
-    if cam_dict.get("dataset_id") and event_dict.get("dataset_id"):
-        if event_dict["dataset_id"] != cam_dict["dataset_id"]:
-            return False, f"Stale event dataset {event_dict['dataset_id']} != camera dataset {cam_dict['dataset_id']}"
+    start_t = float(event_dict.get("start_timestamp", 0.0))
+    is_epoch = (start_t > 1000000.0)
+    # Check camera status
+    is_live = (
+        is_epoch or
+        cam_dict.get("source_type") in ("live", "youtube_live") or
+        event_dict.get("source_type") in ("live", "youtube_live")
+    )
+    if cam_dict.get("status") not in ("READY", "CONNECTED", None) and not is_live:
+        return False, f"Camera {cam_id} status is {cam_dict.get('status')}"
 
-    # Check timestamps within video duration
+    # Check dataset_id matches camera's active dataset_id
+    cam_ds = cam_dict.get("dataset_id")
+    ev_ds = event_dict.get("dataset_id")
+    if cam_ds is not None or ev_ds is not None:
+        if cam_ds != ev_ds:
+            return False, f"Stale event dataset {ev_ds} != camera dataset {cam_ds}"
+
+    # Check timestamps within video duration (for uploaded pre-recorded video only)
     duration = cam_dict.get("duration")
-    if duration and duration > 0:
-        start_t = float(event_dict.get("start_timestamp", 0.0))
+    if duration and duration > 0 and not is_live:
         end_t = float(event_dict.get("end_timestamp", start_t))
         if start_t < 0.0 or start_t > (duration + 0.5):
             return False, f"Event start timestamp {start_t:.2f}s is beyond video duration ({duration:.2f}s)"
         if end_t < 0.0:
             return False, f"Event end timestamp {end_t:.2f}s is negative"
+
+    # Evidence presence check: if configured, verify media files exist on disk
+    video_path = cam_dict.get("video_path")
+    frame_path = event_dict.get("representative_frame")
+    has_video = bool(video_path and os.path.exists(video_path))
+    has_frame = bool(frame_path and os.path.exists(frame_path))
+    if not is_live:
+        if (video_path or frame_path) and not has_video and not has_frame:
+            return False, f"Required visual evidence missing on disk for event {event_dict.get('id', '')[:8]}"
+    else:
+        if frame_path and not os.path.exists(frame_path):
+            return False, f"Required live frame snapshot missing on disk for event {event_dict.get('id', '')[:8]}"
 
     return True, "Valid"
 
@@ -88,6 +113,7 @@ def is_candidate_grounded(
     required_action: Optional[str] = None,
     requires_bag: Optional[bool] = None,
     forbid_bag: Optional[bool] = None,
+    requires_holding_object: Optional[bool] = None,
     required_accessories: Optional[List[str]] = None,
     forbidden_accessories: Optional[List[str]] = None,
     forbidden_objects: Optional[List[str]] = None
@@ -138,43 +164,52 @@ def is_candidate_grounded(
 
     cand_is_auto = (c_lower in ("auto", "auto rickshaw", "autorickshaw", "three wheeler") or attributes.get("is_auto") is True or attributes.get("vehicle_type") == "auto")
 
-    # 3. Exact Canonical Object Class Check (Strict Separation for Auto, Flexible Vehicle Grounding)
+    # 3. Exact Canonical Object Class Check (Strict Separation: car != truck/bus, bicycle != car/motorcycle)
     if required_object:
         req_obj = required_object.lower()
         if req_obj in ("auto", "auto rickshaw", "autorickshaw", "auto-rickshaw", "tuk tuk", "three wheeler", "3 wheeler"):
             if not cand_is_auto:
                 return False, f"Candidate is a {c_lower}, not an auto-rickshaw."
-        elif req_obj in ("car", "automobile", "sedan", "suv", "van"):
+        elif req_obj in ("car", "cars", "automobile", "automobiles", "sedan", "suv"):
             if cand_is_auto:
                 return False, "Candidate is an auto-rickshaw, not a car."
-            # In surveillance feeds, passenger cars, delivery vans, and light commercial vehicles (tempos/trucks) are all 4-wheel vehicles
-            if c_lower not in ("car", "automobile", "sedan", "suv", "van", "vehicle", "truck"):
+            if c_lower in ("bus", "buses", "truck", "trucks", "lorry", "pickup", "motorcycle", "motorbike", "bicycle", "bike", "vehicle"):
+                return False, f"Candidate is a {c_lower}, not a car."
+            if c_lower not in ("car", "automobile", "sedan", "suv"):
                 return False, f"Candidate is a {c_lower}, not a car."
         elif req_obj in ("bus", "buses"):
             if cand_is_auto:
                 return False, "Candidate is an auto-rickshaw, not a bus."
+            if c_lower in ("car", "automobile", "sedan", "suv", "truck", "pickup", "lorry", "motorcycle", "bicycle", "vehicle"):
+                return False, f"Candidate is a {c_lower}, not a bus."
             if c_lower not in ("bus", "buses"):
                 return False, f"Candidate is a {c_lower}, not a bus."
         elif req_obj in ("truck", "trucks", "lorry", "pickup"):
             if cand_is_auto:
                 return False, "Candidate is an auto-rickshaw, not a truck."
-            if c_lower not in ("truck", "trucks", "lorry", "pickup", "van"):
+            if c_lower in ("car", "automobile", "sedan", "suv", "bus", "motorcycle", "bicycle", "vehicle"):
                 return False, f"Candidate is a {c_lower}, not a truck."
-        elif req_obj in ("motorcycle", "motorbike", "moped", "scooter", "scooters", "scotter", "scooty", "twowheeler", "two wheeler", "two-wheeler"):
-            if cand_is_auto:
-                return False, "Candidate is an auto-rickshaw, not a motorcycle."
-            if c_lower not in ("motorcycle", "motorbike", "moped", "scooter"):
-                return False, f"Candidate is a {c_lower}, not a motorcycle."
-        elif req_obj in ("bicycle", "bike", "cycle", "bicycles", "bikes"):
+            if c_lower not in ("truck", "trucks", "lorry", "pickup"):
+                return False, f"Candidate is a {c_lower}, not a truck."
+        elif req_obj in ("bicycle", "bicycles", "bike", "bikes", "cycle", "cycles"):
             if cand_is_auto:
                 return False, "Candidate is an auto-rickshaw, not a bicycle."
-            if c_lower not in ("bicycle", "bike", "cycle", "bicycles", "bikes"):
+            if c_lower in ("car", "automobile", "sedan", "suv", "bus", "truck", "motorcycle", "motorbike", "moped", "scooter", "vehicle"):
                 return False, f"Candidate is a {c_lower}, not a bicycle."
+            if c_lower not in ("bicycle", "bicycles", "bike", "bikes", "cycle", "cycles"):
+                return False, f"Candidate is a {c_lower}, not a bicycle."
+        elif req_obj in ("motorcycle", "motorcycles", "motorbike", "motorbikes", "moped", "scooter", "scooters", "scotter", "scooty", "twowheeler", "two wheeler", "two-wheeler"):
+            if cand_is_auto:
+                return False, "Candidate is an auto-rickshaw, not a motorcycle."
+            if c_lower in ("bicycle", "bike", "cycle", "car", "bus", "truck", "vehicle"):
+                return False, f"Candidate is a {c_lower}, not a motorcycle."
+            if c_lower not in ("motorcycle", "motorbike", "moped", "scooter"):
+                return False, f"Candidate is a {c_lower}, not a motorcycle."
         elif req_obj in ("person", "people", "man", "woman", "human", "pedestrian"):
             if c_lower != "person":
                 return False, f"Candidate is a {c_lower}, not a person."
         elif req_obj in ("vehicle", "vehicles", "transport"):
-            if not cand_is_auto and c_lower not in ("car", "bus", "truck", "motorcycle", "bicycle", "vehicle", "white vehicle"):
+            if not cand_is_auto and c_lower not in ("car", "bus", "truck", "motorcycle", "bicycle", "vehicle"):
                 return False, f"Candidate is a {c_lower}, not a vehicle."
         elif req_obj in ("backpack", "pack"):
             if c_lower not in ("backpack", "pack") and not attributes.get("has_backpack"):
@@ -194,6 +229,9 @@ def is_candidate_grounded(
         elif req_obj in ("phone", "cellphone", "mobile"):
             if c_lower not in ("phone", "cellphone", "mobile") and not attributes.get("has_phone"):
                 return False, f"Candidate is a {c_lower}, not a phone."
+        elif req_obj in ("knife", "knives", "blade", "dagger", "weapon", "weapons"):
+            if c_lower not in ("knife", "weapon") and "knife" not in cand_accessories:
+                return False, f"Candidate is a {c_lower}, not a knife."
         elif req_obj in ("bottle", "cup"):
             if c_lower not in ("bottle", "cup") and not attributes.get("has_bottle"):
                 return False, f"Candidate is a {c_lower}, not a bottle."
@@ -227,7 +265,7 @@ def is_candidate_grounded(
         if lower_color != "unknown" and not are_colors_compatible(req_lcol, lower_color):
             return False, f"Lower clothing color verified as '{lower_color}', not requested '{req_lcol}'."
 
-    # 6. Specific Accessory Verification (e.g. backpack, handbag, umbrella, phone, bottle)
+    # 6. Specific Accessory Verification (e.g. backpack, handbag, umbrella, phone, bottle, knife)
     if required_accessories:
         for req_acc in required_accessories:
             acc_name = req_acc.lower()
@@ -249,14 +287,32 @@ def is_candidate_grounded(
             elif acc_name in ("bottle", "cup"):
                 if not attributes.get("has_bottle") and "bottle" not in cand_accessories:
                     return False, "Candidate does not have a verified bottle in hand."
+            elif acc_name in ("knife", "blade", "dagger", "weapon"):
+                if "knife" not in cand_accessories and c_lower != "knife":
+                    return False, "Candidate does not have a verified knife or weapon."
             elif acc_name in ("bag", "bags"):
                 if not has_bag:
                     return False, "Candidate does not have a verified bag."
 
+    # 7. Holding Object in Hand Verification
+    if requires_holding_object:
+        has_held = bool(
+            attributes.get("has_phone") or
+            attributes.get("has_bottle") or
+            attributes.get("has_umbrella") or
+            attributes.get("has_bag") or
+            attributes.get("has_handbag") or
+            attributes.get("has_backpack") or
+            attributes.get("has_suitcase") or
+            len(cand_accessories) > 0
+        )
+        if not has_held:
+            return False, "Candidate person verified without any held object or accessory in hand."
+
     # 7. Movement & Action Verification
     if required_action:
         req_act = required_action.lower()
-        if req_act in ("moving", "in motion", "passed", "passing", "entering", "exiting"):
+        if req_act in ("moving", "in motion", "driving", "entering", "exiting"):
             if not is_moving:
                 return False, "Candidate object is stationary, not moving."
         elif req_act in ("stationary", "stopped", "parked", "standing"):
@@ -292,10 +348,20 @@ class VectorSearch:
         
         if HAS_FAISS:
             if os.path.exists(self.index_file):
-                self.index = faiss.read_index(self.index_file)
-                self.dimension = self.index.d
+                try:
+                    self.index = faiss.read_index(self.index_file)
+                    self.dimension = self.index.d
+                except Exception as read_err:
+                    logger.warning(f"[VectorSearch] Corrupted or invalid FAISS index file ({read_err}). Re-initializing fresh IndexFlatIP({self.dimension}).")
+                    try:
+                        os.remove(self.index_file)
+                    except Exception:
+                        pass
+                    self.index = faiss.IndexFlatIP(self.dimension)
+                    faiss.write_index(self.index, self.index_file)
             else:
                 self.index = faiss.IndexFlatIP(self.dimension)
+                faiss.write_index(self.index, self.index_file)
         else:
             self.vectors = []
             if os.path.exists(f"{INDEX_PATH}/numpy_vectors.npy"):
@@ -320,7 +386,16 @@ class VectorSearch:
     def reload(self):
         if HAS_FAISS:
             if os.path.exists(self.index_file):
-                self.index = faiss.read_index(self.index_file)
+                try:
+                    self.index = faiss.read_index(self.index_file)
+                except Exception as e:
+                    logger.warning(f"[VectorSearch] Error reloading FAISS index ({e}). Rebuilding clean index.")
+                    try:
+                        os.remove(self.index_file)
+                    except Exception:
+                        pass
+                    self.index = faiss.IndexFlatIP(self.dimension)
+                    self.save()
         else:
             if os.path.exists(f"{INDEX_PATH}/numpy_vectors.npy"):
                 self.vectors = list(np.load(f"{INDEX_PATH}/numpy_vectors.npy"))
@@ -368,7 +443,16 @@ class VectorSearch:
         new_mapping = {}
         new_id = 0
         
-        rows = execute_query("SELECT id, representative_frame, concept FROM events", fetch=True)
+        rows = execute_query(
+            """
+            SELECT events.id, events.representative_frame, events.concept
+            FROM events
+            JOIN cameras ON cameras.id = events.camera_id
+            WHERE (cameras.status IN ('READY', 'CONNECTED') OR events.source_type IN ('live', 'youtube_live'))
+              AND (cameras.dataset_id IS NULL OR cameras.dataset_id = events.dataset_id)
+            """,
+            fetch=True
+        ) or []
         concept_cache = {}
         for r in rows:
             rd = dict(r)
@@ -414,7 +498,7 @@ class VectorSearch:
         self.save()
         logger.info(f"Vector index rebuilt successfully with {new_id} events.")
 
-    def add_vector(self, event_id: str, vector: np.ndarray):
+    def add_vector(self, event_id: str, vector: np.ndarray, save: bool = False):
         vector = np.array([vector], dtype=np.float32)
         idx = self.next_id
         
@@ -425,8 +509,12 @@ class VectorSearch:
             
         self.id_to_event[idx] = event_id
         self.next_id += 1
+        self._dirty = True
         
         execute_query("UPDATE events SET embedding_ref = ? WHERE id = ?", (str(idx), event_id))
+        if save:
+            self.save()
+            self._dirty = False
 
     def search_by_text(
         self,
@@ -439,6 +527,7 @@ class VectorSearch:
         required_action: Optional[str] = None,
         requires_bag: Optional[bool] = None,
         forbid_bag: Optional[bool] = None,
+        requires_holding_object: Optional[bool] = None,
         required_accessories: Optional[List[str]] = None,
         forbidden_accessories: Optional[List[str]] = None,
         forbidden_objects: Optional[List[str]] = None,
@@ -457,7 +546,11 @@ class VectorSearch:
         
         if HAS_FAISS:
             if self.index.ntotal == 0:
-                return ([], {}) if return_debug else []
+                cnt_row = execute_query("SELECT COUNT(*) as cnt FROM events", fetch=True, fetch_one=True)
+                if cnt_row and cnt_row["cnt"] > 0:
+                    self.rebuild_from_db()
+                if self.index.ntotal == 0:
+                    return ([], {}) if return_debug else []
             if text_vector.shape[1] != self.index.d:
                 logger.warning(f"Embedding dim mismatch: query vector ({text_vector.shape[1]}) != FAISS index ({self.index.d}). Auto-rebuilding index...")
                 self.rebuild_from_db()
@@ -481,15 +574,20 @@ class VectorSearch:
         # Structured DB candidates supplement (Hybrid Vector + Relational Retrieval)
         seen_events = {r["event_id"] for r in results}
         if required_object or camera_id:
-            db_sql = "SELECT id FROM events WHERE 1=1"
+            db_sql = """
+                SELECT events.id FROM events
+                JOIN cameras ON cameras.id = events.camera_id
+                WHERE (cameras.status IN ('READY', 'CONNECTED') OR events.source_type IN ('live', 'youtube_live'))
+                  AND (cameras.dataset_id IS NULL OR cameras.dataset_id = events.dataset_id)
+            """
             db_params = []
             if camera_id:
-                db_sql += " AND camera_id = ?"
+                db_sql += " AND events.camera_id = ?"
                 db_params.append(camera_id)
             if required_object:
-                db_sql += " AND concept = ?"
+                db_sql += " AND events.concept = ?"
                 db_params.append(required_object.lower())
-            db_sql += " ORDER BY start_timestamp ASC LIMIT 500"
+            db_sql += " ORDER BY events.start_timestamp ASC LIMIT 500"
             db_rows = execute_query(db_sql, tuple(db_params), fetch=True) or []
             for dbr in db_rows:
                 eid = dbr["id"]
@@ -505,7 +603,7 @@ class VectorSearch:
         for r in results:
             event_id = r["event_id"]
             row = execute_query(
-                "SELECT id, camera_id, dataset_id, tracking_id, start_timestamp, end_timestamp, concept, bounding_boxes, representative_frame, attributes FROM events WHERE id = ?",
+                "SELECT id, camera_id, dataset_id, tracking_id, start_timestamp, end_timestamp, concept, bounding_boxes, representative_frame, attributes, source_type FROM events WHERE id = ?",
                 (event_id,),
                 fetch=True,
                 fetch_one=True
@@ -561,6 +659,7 @@ class VectorSearch:
                 required_action=required_action,
                 requires_bag=requires_bag,
                 forbid_bag=forbid_bag,
+                requires_holding_object=requires_holding_object,
                 required_accessories=required_accessories,
                 forbidden_accessories=forbidden_accessories,
                 forbidden_objects=forbidden_objects
@@ -644,6 +743,7 @@ class VectorSearch:
         required_action: Optional[str] = None,
         requires_bag: Optional[bool] = None,
         forbid_bag: Optional[bool] = None,
+        requires_holding_object: Optional[bool] = None,
         required_accessories: Optional[List[str]] = None,
         forbidden_accessories: Optional[List[str]] = None,
         forbidden_objects: Optional[List[str]] = None,
@@ -657,16 +757,26 @@ class VectorSearch:
         """
         from backend.app.core.memory import check_bbox_region_overlap
         
-        query_sql = "SELECT id, camera_id, dataset_id, tracking_id, start_timestamp, end_timestamp, concept, bounding_boxes, representative_frame, attributes FROM events WHERE 1=1"
+        query_sql = """
+            SELECT events.id, events.camera_id, events.dataset_id, events.tracking_id,
+                   events.start_timestamp, events.end_timestamp, events.concept,
+                   events.bounding_boxes, events.representative_frame, events.attributes,
+                   events.source_type
+            FROM events
+            JOIN cameras ON cameras.id = events.camera_id
+            WHERE (cameras.status IN ('READY', 'CONNECTED') OR events.source_type IN ('live', 'youtube_live'))
+              AND (cameras.dataset_id IS NULL OR cameras.dataset_id = events.dataset_id)
+        """
         params = []
         if camera_id:
-            query_sql += " AND camera_id = ?"
+            query_sql += " AND events.camera_id = ?"
             params.append(camera_id)
             
-        rows = execute_query(query_sql, tuple(params), fetch=True)
+        rows = execute_query(query_sql, tuple(params), fetch=True) or []
         
         total_frame_detections = 0
         matching_tracks = set()
+        unique_tids_set = set()
         matching_events = []
         
         target_dataset_id = None
@@ -704,7 +814,7 @@ class VectorSearch:
                 if not check_bbox_region_overlap(bboxes, region):
                     continue
                     
-            # Grounding check
+            # Grounding check (canonical object class, color, action, accessories)
             is_valid, _ = is_candidate_grounded(
                 concept=row_dict["concept"],
                 attributes=attrs,
@@ -715,6 +825,7 @@ class VectorSearch:
                 required_action=required_action,
                 requires_bag=requires_bag,
                 forbid_bag=forbid_bag,
+                requires_holding_object=requires_holding_object,
                 required_accessories=required_accessories,
                 forbidden_accessories=forbidden_accessories,
                 forbidden_objects=forbidden_objects
@@ -722,29 +833,187 @@ class VectorSearch:
             
             if is_valid:
                 tid = str(row_dict.get("tracking_id") or row_dict["id"])
-                matching_tracks.add(tid)
+                track_key = (row_dict["camera_id"], tid)
+                if track_key not in matching_tracks:
+                    matching_tracks.add(track_key)
+                    matching_events.append({
+                        "event": row_dict["id"],
+                        "camera": row_dict["camera_id"],
+                        "dataset_id": row_dict.get("dataset_id"),
+                        "tracking_id": tid,
+                        "timestamp": row_dict["start_timestamp"],
+                        "end_timestamp": row_dict["end_timestamp"],
+                        "concept": row_dict["concept"],
+                        "attributes": attrs,
+                        "frame": row_dict["representative_frame"]
+                    })
+                unique_tids_set.add(tid)
                 total_frame_detections += max(len(bboxes), 1)
-                matching_events.append({
-                    "event": row_dict["id"],
-                    "camera": row_dict["camera_id"],
-                    "dataset_id": row_dict.get("dataset_id"),
-                    "tracking_id": tid,
-                    "timestamp": row_dict["start_timestamp"],
-                    "end_timestamp": row_dict["end_timestamp"],
-                    "concept": row_dict["concept"],
-                    "attributes": attrs,
-                    "frame": row_dict["representative_frame"]
-                })
                 
-        sorted_tids = sorted(list(matching_tracks), key=lambda x: int(x) if x.isdigit() else x)
+        sorted_tids = sorted(list(unique_tids_set), key=lambda x: int(x) if x.isdigit() else x)
         
         return {
-            "count": len(sorted_tids),
+            "count": len(matching_tracks),
             "total_detections": total_frame_detections,
             "unique_tracking_ids": sorted_tids,
             "dataset_id": target_dataset_id,
             "video_path": target_video_path,
             "events": matching_events
+        }
+
+    def search_cross_camera(
+        self,
+        camera_ids: List[str],
+        required_object: Optional[str] = None,
+        required_color: Optional[str] = None,
+        min_timestamp: Optional[float] = None,
+        max_timestamp: Optional[float] = None
+    ) -> Dict[str, Any]:
+        """
+        Cross-camera object search correlating observations across multiple cameras.
+        Returns candidate matches, temporal delta, visual similarity, and explicit uncertainty.
+        """
+        from backend.app.core.evidence import format_time_12h
+
+        cam_info = {}
+        for cid in camera_ids:
+            row = execute_query("SELECT id, name FROM cameras WHERE id = ?", (cid,), fetch=True, fetch_one=True)
+            if row:
+                cam_info[cid] = row["name"]
+            else:
+                cam_info[cid] = cid
+
+        if len(camera_ids) < 2:
+            return {
+                "verdict": "NO MATCH",
+                "is_match": False,
+                "summary": "At least two distinct cameras are required for cross-camera correlation.",
+                "results": [],
+                "debug": {"camera_ids": camera_ids}
+            }
+
+        cam1_id, cam2_id = camera_ids[0], camera_ids[1]
+        cam1_name = cam_info.get(cam1_id, cam1_id)
+        cam2_name = cam_info.get(cam2_id, cam2_id)
+
+        embedder_dummy = [0.0] * self.dimension
+        events1 = self.search_by_text(
+            text_vector=embedder_dummy,
+            top_k=25,
+            required_object=required_object,
+            required_color=required_color,
+            camera_id=cam1_id,
+            min_timestamp=min_timestamp,
+            max_timestamp=max_timestamp
+        )
+        events2 = self.search_by_text(
+            text_vector=embedder_dummy,
+            top_k=25,
+            required_object=required_object,
+            required_color=required_color,
+            camera_id=cam2_id,
+            min_timestamp=min_timestamp,
+            max_timestamp=max_timestamp
+        )
+
+        obj_label = required_object or "object"
+        if not events1 or not events2:
+            missing = []
+            if not events1: missing.append(f"{cam1_name}")
+            if not events2: missing.append(f"{cam2_name}")
+            return {
+                "verdict": "NO",
+                "is_match": False,
+                "summary": f"No matching {obj_label} was detected in {' and '.join(missing)} to correlate across cameras.",
+                "results": [],
+                "debug": {
+                    "cam1_matches": len(events1),
+                    "cam2_matches": len(events2),
+                    "camera_ids": [cam1_id, cam2_id]
+                }
+            }
+
+        best_pair = None
+        best_score = -1.0
+
+        for e1 in events1:
+            attr1 = e1.get("attributes") or {}
+            col1 = (attr1.get("color") or "unknown").lower()
+            concept1 = e1["concept"].lower()
+
+            for e2 in events2:
+                attr2 = e2.get("attributes") or {}
+                col2 = (attr2.get("color") or "unknown").lower()
+                concept2 = e2["concept"].lower()
+
+                # Concept compatibility
+                if concept1 != concept2:
+                    if not (concept1 in ("car", "vehicle") and concept2 in ("car", "vehicle")):
+                        continue
+
+                # Color compatibility
+                score = 0.65
+                if col1 != "unknown" and col2 != "unknown":
+                    if are_colors_compatible(col1, col2):
+                        score += 0.20
+                    else:
+                        continue
+                elif col1 != "unknown" or col2 != "unknown":
+                    score += 0.05
+
+                t1 = float(e1["timestamp"])
+                t2 = float(e2["timestamp"])
+                delta_sec = abs(t2 - t1)
+
+                if delta_sec < 300:
+                    score += 0.15
+                elif delta_sec < 1800:
+                    score += 0.10
+                elif delta_sec < 3600:
+                    score += 0.05
+
+                if score > best_score:
+                    best_score = score
+                    best_pair = (e1, e2, delta_sec, min(0.89, score))
+
+        if not best_pair:
+            return {
+                "verdict": "NO",
+                "is_match": False,
+                "summary": f"Candidate {obj_label}s were detected on both {cam1_name} and {cam2_name}, but visual attributes (such as colors) did not match to establish a cross-camera correlation.",
+                "results": [],
+                "debug": {"cam1_matches": len(events1), "cam2_matches": len(events2)}
+            }
+
+        e1, e2, delta_sec, conf = best_pair
+        time_str1 = e1.get("time_formatted") or format_time_12h(e1["timestamp"])
+        time_str2 = e2.get("time_formatted") or format_time_12h(e2["timestamp"])
+        delta_str = f"{int(delta_sec)}s" if delta_sec < 60 else f"{int(delta_sec // 60)}m {int(delta_sec % 60)}s"
+
+        attr1 = e1.get("attributes") or {}
+        col_desc = f"{attr1.get('color')} " if attr1.get("color") and attr1.get("color") != "unknown" else ""
+        conc_desc = e1["concept"]
+
+        summary = (
+            f"Candidate match found across cameras: A {col_desc}{conc_desc} (Track #{e1.get('tracking_id')} at {time_str1}) on {cam1_name} "
+            f"and a {col_desc}{conc_desc} (Track #{e2.get('tracking_id')} at {time_str2}) on {cam2_name} "
+            f"share matching visual attributes with temporal proximity (time delta: {delta_str}). "
+            f"Note: Visual appearance and timing suggest the same {conc_desc}, but single-camera tracking cannot guarantee unique identity across cameras without dedicated multi-camera re-ID."
+        )
+
+        return {
+            "verdict": "CROSS_CAMERA",
+            "is_match": True,
+            "confidence": round(conf, 2),
+            "summary": summary,
+            "results": [e1, e2],
+            "debug": {
+                "camera_1": {"id": cam1_id, "name": cam1_name, "event": e1["event"], "tracking_id": e1.get("tracking_id"), "timestamp": e1["timestamp"]},
+                "camera_2": {"id": cam2_id, "name": cam2_name, "event": e2["event"], "tracking_id": e2.get("tracking_id"), "timestamp": e2["timestamp"]},
+                "time_delta_seconds": round(delta_sec, 1),
+                "confidence": round(conf, 2),
+                "uncertainty_note": "Single-camera ByteTrack IDs are scoped per camera. Cross-camera match is based on visual attribute consistency and temporal proximity."
+            }
         }
 
 _vector_search_instance = None

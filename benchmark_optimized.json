@@ -1,0 +1,205 @@
+{
+  "timestamp": 1792001678.142687,
+  "hardware": {
+    "python_version": "3.9.6",
+    "os": "Darwin",
+    "cpu": true,
+    "cuda": false,
+    "mps": true,
+    "primary_device": "mps"
+  },
+  "scenarios": {
+    "1_camera": {
+      "scenario": "1 Cameras",
+      "cameras_count": 1,
+      "concurrent_uploaded_job": false,
+      "duration_seconds": 12.01,
+      "aggregate_inference_fps": 3.91,
+      "aggregate_capture_fps": 12.41,
+      "per_camera_metrics": {
+        "bench_cam_1": {
+          "capture_fps": 12.41,
+          "inference_fps": 3.91,
+          "preview_fps": 14.24,
+          "frames_captured": 149,
+          "frames_analyzed": 47,
+          "frames_skipped": 102,
+          "avg_latency_ms": 72.7,
+          "unique_tracks": 0
+        }
+      },
+      "inference_latency_ms": {
+        "min": 34.3,
+        "p50": 78.8,
+        "p95": 121.8,
+        "max": 310.7
+      },
+      "frame_age_ms": 41.9,
+      "avg_cpu_percent": 691.9,
+      "avg_ram_mb": 1126.6,
+      "query_latency_under_load_ms": 0.0,
+      "hardware": {
+        "python_version": "3.9.6",
+        "os": "Darwin",
+        "cpu": true,
+        "cuda": false,
+        "mps": true,
+        "primary_device": "mps"
+      }
+    },
+    "2_cameras": {
+      "scenario": "2 Cameras",
+      "cameras_count": 2,
+      "concurrent_uploaded_job": false,
+      "duration_seconds": 12.03,
+      "aggregate_inference_fps": 7.98,
+      "aggregate_capture_fps": 25.01,
+      "per_camera_metrics": {
+        "bench_cam_1": {
+          "capture_fps": 12.47,
+          "inference_fps": 3.99,
+          "preview_fps": 14.29,
+          "frames_captured": 150,
+          "frames_analyzed": 48,
+          "frames_skipped": 102,
+          "avg_latency_ms": 57.0,
+          "unique_tracks": 0
+        },
+        "bench_cam_2": {
+          "capture_fps": 12.55,
+          "inference_fps": 3.99,
+          "preview_fps": 14.29,
+          "frames_captured": 151,
+          "frames_analyzed": 48,
+          "frames_skipped": 103,
+          "avg_latency_ms": 61.7,
+          "unique_tracks": 0
+        }
+      },
+      "inference_latency_ms": {
+        "min": 33.5,
+        "p50": 56.0,
+        "p95": 97.1,
+        "max": 110.8
+      },
+      "frame_age_ms": 40.5,
+      "avg_cpu_percent": 735.7,
+      "avg_ram_mb": 1209.0,
+      "query_latency_under_load_ms": 0.0,
+      "hardware": {
+        "python_version": "3.9.6",
+        "os": "Darwin",
+        "cpu": true,
+        "cuda": false,
+        "mps": true,
+        "primary_device": "mps"
+      }
+    },
+    "3_cameras": {
+      "scenario": "3 Cameras",
+      "cameras_count": 3,
+      "concurrent_uploaded_job": false,
+      "duration_seconds": 12.02,
+      "aggregate_inference_fps": 10.9,
+      "aggregate_capture_fps": 46.92,
+      "per_camera_metrics": {
+        "bench_cam_1": {
+          "capture_fps": 12.48,
+          "inference_fps": 3.49,
+          "preview_fps": 14.22,
+          "frames_captured": 150,
+          "frames_analyzed": 42,
+          "frames_skipped": 108,
+          "avg_latency_ms": 257.3,
+          "unique_tracks": 0
+        },
+        "bench_cam_2": {
+          "capture_fps": 12.48,
+          "inference_fps": 3.74,
+          "preview_fps": 14.22,
+          "frames_captured": 150,
+          "frames_analyzed": 45,
+          "frames_skipped": 105,
+          "avg_latency_ms": 204.3,
+          "unique_tracks": 0
+        },
+        "bench_cam_3": {
+          "capture_fps": 21.96,
+          "inference_fps": 3.66,
+          "preview_fps": 14.22,
+          "frames_captured": 264,
+          "frames_analyzed": 44,
+          "frames_skipped": 220,
+          "avg_latency_ms": 225.3,
+          "unique_tracks": 0
+        }
+      },
+      "inference_latency_ms": {
+        "min": 76.4,
+        "p50": 183.0,
+        "p95": 359.4,
+        "max": 463.1
+      },
+      "frame_age_ms": 32.0,
+      "avg_cpu_percent": 761.0,
+      "avg_ram_mb": 1067.8,
+      "query_latency_under_load_ms": 0.0,
+      "hardware": {
+        "python_version": "3.9.6",
+        "os": "Darwin",
+        "cpu": true,
+        "cuda": false,
+        "mps": true,
+        "primary_device": "mps"
+      }
+    },
+    "2_cameras_plus_upload": {
+      "scenario": "2 Cameras + Uploaded Video Job",
+      "cameras_count": 2,
+      "concurrent_uploaded_job": true,
+      "duration_seconds": 12.03,
+      "aggregate_inference_fps": 7.98,
+      "aggregate_capture_fps": 25.02,
+      "per_camera_metrics": {
+        "bench_cam_1": {
+          "capture_fps": 12.55,
+          "inference_fps": 3.99,
+          "preview_fps": 14.3,
+          "frames_captured": 151,
+          "frames_analyzed": 48,
+          "frames_skipped": 103,
+          "avg_latency_ms": 85.7,
+          "unique_tracks": 0
+        },
+        "bench_cam_2": {
+          "capture_fps": 12.47,
+          "inference_fps": 3.99,
+          "preview_fps": 14.3,
+          "frames_captured": 150,
+          "frames_analyzed": 48,
+          "frames_skipped": 102,
+          "avg_latency_ms": 95.2,
+          "unique_tracks": 0
+        }
+      },
+      "inference_latency_ms": {
+        "min": 34.8,
+        "p50": 91.4,
+        "p95": 173.3,
+        "max": 269.4
+      },
+      "frame_age_ms": 38.1,
+      "avg_cpu_percent": 775.7,
+      "avg_ram_mb": 1169.0,
+      "query_latency_under_load_ms": 0.0,
+      "hardware": {
+        "python_version": "3.9.6",
+        "os": "Darwin",
+        "cpu": true,
+        "cuda": false,
+        "mps": true,
+        "primary_device": "mps"
+      }
+    }
+  }
+}

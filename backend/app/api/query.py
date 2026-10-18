@@ -1,3 +1,4 @@
+import os
 import time
 import uuid
 import json
@@ -47,6 +48,8 @@ class ParsedQuery(BaseModel):
     relation: Optional[str] = None
     camera: Optional[str] = None
     camera_label: Optional[str] = None
+    cross_camera_list: Optional[List[str]] = None
+    requires_holding_object: bool = False
     resolved_memory: Optional[MemoryReferenceInfo] = None
     needs_clarification: bool = False
     clarification_prompt: Optional[str] = None
@@ -58,6 +61,7 @@ class QueryMatch(BaseModel):
     camera: str
     tracking_id: Optional[str] = None
     timestamp: float
+    time_formatted: Optional[str] = None
     end_timestamp: Optional[float] = None
     similarity: float = 0.0
     concept: str
@@ -82,9 +86,27 @@ class QueryResponse(BaseModel):
 @router.post("/query", response_model=QueryResponse)
 def execute_natural_language_query(request: QueryRequest):
     start_time = time.time()
+    parser = get_query_parser()
+
+    if not request.query or not request.query.strip():
+        latency_ms = (time.time() - start_time) * 1000
+        return {
+            "query": request.query,
+            "verdict": "NO MATCH",
+            "summary": "Empty query provided. Please specify what you would like to find in the CCTV streams.",
+            "count": None,
+            "debug": None,
+            "needs_clarification": False,
+            "clarification_prompt": None,
+            "missing_reference": None,
+            "available_cameras": None,
+            "parsed": parser.parse(""),
+            "results": [],
+            "total_matches": 0,
+            "latency_ms": latency_ms
+        }
     
     # 1. Deterministic NLP Query Parsing & Intent Extraction
-    parser = get_query_parser()
     parsed_info = parser.parse(request.query)
     
     # 2. Check if Clarify-Once is needed (unmapped landmark)
@@ -92,6 +114,7 @@ def execute_natural_language_query(request: QueryRequest):
         cam_rows = execute_query("SELECT id, name FROM cameras WHERE is_demo = 0", fetch=True)
         available_cams = [{"id": r["id"], "name": r["name"]} for r in cam_rows]
         latency_ms = (time.time() - start_time) * 1000
+        _record_query_log(request.query, latency_ms, result_summary=parsed_info["clarification_prompt"], result_count=0)
         return {
             "query": request.query,
             "verdict": "CLARIFICATION REQUIRED",
@@ -126,10 +149,12 @@ def execute_natural_language_query(request: QueryRequest):
     if not all_cams:
         latency_ms = (time.time() - start_time) * 1000
         logger.warning("[QUERY ERROR] No cameras registered in system.")
+        summary = "No active cameras. Upload CCTV video to begin."
+        _record_query_log(request.query, latency_ms, result_summary=summary, result_count=0)
         return {
             "query": request.query,
             "verdict": "NO MATCH",
-            "summary": "No active cameras. Upload CCTV video to begin.",
+            "summary": summary,
             "count": None,
             "needs_clarification": False,
             "clarification_prompt": None,
@@ -146,10 +171,12 @@ def execute_natural_language_query(request: QueryRequest):
         if not target_cam:
             latency_ms = (time.time() - start_time) * 1000
             logger.warning(f"[QUERY ERROR] No READY camera for camera_id={camera_id}")
+            summary = f"Camera '{camera_id}' not found."
+            _record_query_log(request.query, latency_ms, result_summary=summary, result_count=0)
             return {
                 "query": request.query,
                 "verdict": "NO MATCH",
-                "summary": f"Camera '{camera_id}' not found.",
+                "summary": summary,
                 "count": None,
                 "needs_clarification": False,
                 "clarification_prompt": None,
@@ -162,10 +189,12 @@ def execute_natural_language_query(request: QueryRequest):
             }
         if target_cam.get("status") == "ANALYZING":
             latency_ms = (time.time() - start_time) * 1000
+            summary = f"Video analysis is currently in progress for {target_cam['name']}. Please wait a moment for event indexing to complete."
+            _record_query_log(request.query, latency_ms, result_summary=summary, result_count=0)
             return {
                 "query": request.query,
                 "verdict": "NO MATCH",
-                "summary": f"Video analysis is currently in progress for {target_cam['name']}. Please wait a moment for event indexing to complete.",
+                "summary": summary,
                 "count": None,
                 "needs_clarification": False,
                 "clarification_prompt": None,
@@ -187,6 +216,8 @@ def execute_natural_language_query(request: QueryRequest):
     sec_obj = parsed_info["secondary_object"]
     requires_bag = parsed_info.get("requires_bag", False)
     forbid_bag = parsed_info.get("forbid_bag", False)
+    requires_holding = parsed_info.get("requires_holding_object", False)
+    cross_cams = parsed_info.get("cross_camera_list") or []
     req_accessories = parsed_info.get("required_accessories", [])
     forbid_accessories = parsed_info.get("forbidden_accessories", [])
     forbidden_objects = parsed_info.get("forbidden_objects", [])
@@ -199,6 +230,47 @@ def execute_natural_language_query(request: QueryRequest):
     
     vector_search = get_vector_search()
     
+    # Handle Special Intent: CROSS_CAMERA (Correlate objects across multiple cameras)
+    if intent == "CROSS_CAMERA":
+        if len(cross_cams) < 2:
+            cam_list_rows = execute_query("SELECT id FROM cameras WHERE is_demo = 0 ORDER BY created_at ASC", fetch=True) or []
+            all_ids = [r["id"] for r in cam_list_rows]
+            if len(all_ids) >= 2:
+                cross_cams = all_ids[:2]
+            else:
+                cross_cams = all_ids
+
+        cross_res = vector_search.search_cross_camera(
+            camera_ids=cross_cams,
+            required_object=req_obj,
+            required_color=req_color,
+            min_timestamp=min_timestamp,
+            max_timestamp=max_timestamp
+        )
+        latency_ms = (time.time() - start_time) * 1000
+        _record_query_log(
+            request.query,
+            latency_ms,
+            result_summary=cross_res.get("summary"),
+            result_count=len(cross_res.get("results", [])) if cross_res.get("is_match") else 0
+        )
+
+        return {
+            "query": request.query,
+            "verdict": cross_res["verdict"],
+            "summary": cross_res["summary"],
+            "count": len(cross_res.get("results", [])) if cross_res.get("is_match") else 0,
+            "debug": cross_res.get("debug"),
+            "needs_clarification": False,
+            "clarification_prompt": None,
+            "missing_reference": None,
+            "available_cameras": None,
+            "parsed": parsed_info,
+            "results": cross_res.get("results", []),
+            "total_matches": len(cross_res.get("results", [])),
+            "latency_ms": latency_ms
+        }
+    
     # 3. Handle Special Intent: INVENTORY (List detected objects)
     if intent == "INVENTORY":
         if camera_id:
@@ -209,7 +281,17 @@ def execute_natural_language_query(request: QueryRequest):
             else:
                 events_rows = execute_query("SELECT concept, COUNT(DISTINCT tracking_id) as cnt FROM events WHERE camera_id = ? GROUP BY concept", (camera_id,), fetch=True)
         else:
-            events_rows = execute_query("SELECT concept, COUNT(DISTINCT tracking_id) as cnt FROM events GROUP BY concept", fetch=True)
+            events_rows = execute_query(
+                """
+                SELECT events.concept, COUNT(DISTINCT events.tracking_id) as cnt
+                FROM events
+                JOIN cameras ON cameras.id = events.camera_id
+                WHERE cameras.status = 'READY'
+                  AND (cameras.dataset_id IS NULL OR cameras.dataset_id = events.dataset_id)
+                GROUP BY events.concept
+                """,
+                fetch=True
+            ) or []
             
         items_desc = [f"{r['cnt']} unique {r['concept']}(s)" for r in events_rows]
         cam_scope_str = f" in {camera_id}" if camera_id else " in video"
@@ -240,6 +322,7 @@ def execute_natural_language_query(request: QueryRequest):
             required_action=req_action,
             requires_bag=requires_bag,
             forbid_bag=forbid_bag,
+            requires_holding_object=requires_holding,
             required_accessories=req_accessories,
             forbidden_accessories=forbid_accessories,
             forbidden_objects=forbidden_objects,
@@ -269,17 +352,20 @@ def execute_natural_language_query(request: QueryRequest):
             qualifiers.append(f"with {', '.join(req_accessories)}")
         elif requires_bag:
             qualifiers.append("carrying bags")
+        elif requires_holding:
+            qualifiers.append("holding objects")
             
         qualifier_str = f" ({' '.join(qualifiers)})" if qualifiers else ""
         cam_label = parsed_info.get("camera_label") or ("all cameras" if not camera_id else camera_id)
         region_str = f" crossing {parsed_info['resolved_memory']['name']}" if parsed_info.get("resolved_memory") else ""
+        time_str = f" in {time_filter['label']}" if time_filter else ""
         
         if total_count == 0:
-            summary_text = f"0 unique {plural_obj}{qualifier_str} detected in {cam_label}{region_str}."
+            summary_text = f"0 unique {plural_obj}{qualifier_str} detected in {cam_label}{time_str}{region_str}."
         elif total_count == 1:
-            summary_text = f"1 unique {singular_obj}{qualifier_str} detected in {cam_label}{region_str} (Track #{unique_tids[0] if unique_tids else '1'})."
+            summary_text = f"1 unique {singular_obj}{qualifier_str} detected in {cam_label}{time_str}{region_str} (Track #{unique_tids[0] if unique_tids else '1'}, across {total_detections} frame detections)."
         else:
-            summary_text = f"{total_count} unique {plural_obj}{qualifier_str} detected in {cam_label}{region_str} (counted via unique tracking IDs)."
+            summary_text = f"{total_count} unique {plural_obj}{qualifier_str} detected in {cam_label}{time_str}{region_str} (counted via unique tracking IDs, across {total_detections} frame detections)."
             
         debug_info = {
             "camera_id": camera_id or "all",
@@ -291,7 +377,7 @@ def execute_natural_language_query(request: QueryRequest):
         }
         
         latency_ms = (time.time() - start_time) * 1000
-        _record_query_log(request.query, latency_ms)
+        _record_query_log(request.query, latency_ms, result_summary=summary_text, result_count=total_count)
         
         return {
             "query": request.query,
@@ -326,6 +412,7 @@ def execute_natural_language_query(request: QueryRequest):
         required_action=req_action,
         requires_bag=requires_bag,
         forbid_bag=forbid_bag,
+        requires_holding_object=requires_holding,
         required_accessories=req_accessories,
         forbidden_accessories=forbid_accessories,
         forbidden_objects=forbidden_objects,
@@ -337,8 +424,6 @@ def execute_natural_language_query(request: QueryRequest):
     )
     
     latency_ms = (time.time() - start_time) * 1000
-    _record_query_log(request.query, latency_ms)
-    
     total_matches = len(matches)
     
     # 6. Formulate Honest Grounded Verdict
@@ -347,7 +432,7 @@ def execute_natural_language_query(request: QueryRequest):
         c_name = top_match["concept"]
         attr = top_match.get("attributes") or {}
         display_name = "auto-rickshaw" if (attr.get("is_auto") or req_obj == "auto" or c_name == "auto") else c_name
-        color_str = f"{attr.get('color')} " if attr.get("color") and attr.get("color") != "unknown" else ""
+        color_str = f"{attr.get('color')} " if attr.get('color') and attr.get('color') != "unknown" else ""
         if c_name in ("car", "bus", "truck", "motorcycle", "bicycle", "vehicle", "auto"):
             moving_str = "moving " if attr.get("is_moving") else ""
         else:
@@ -360,6 +445,10 @@ def execute_natural_language_query(request: QueryRequest):
             desc = display_name
         if forbid_bag:
             desc = "person (verified without bag/backpack)"
+        elif "knife" in req_accessories or req_obj == "knife":
+            desc = "person carrying a knife/weapon" if c_name == "person" else "knife"
+        elif requires_holding:
+            desc = "person holding an object in hand"
         elif req_accessories:
             desc = f"person carrying {', '.join(req_accessories)}"
         elif requires_bag:
@@ -368,6 +457,10 @@ def execute_natural_language_query(request: QueryRequest):
             desc = f"person wearing {req_upper_color} shirt and {req_lower_color} pants"
         elif req_upper_color and req_obj:
             desc = f"person wearing {req_upper_color} shirt"
+
+        from backend.app.core.evidence import format_time_12h
+        time_formatted_top = top_match.get("time_formatted") or format_time_12h(top_match["timestamp"])
+
         # Handle specific natural language questions
         q_lower = request.query.lower()
         if re.search(r"\b(?:what color|what colour|color of|colour of)\b", q_lower):
@@ -385,14 +478,19 @@ def execute_natural_language_query(request: QueryRequest):
                 summary = f"Yes, the detected person (Track #{top_match.get('tracking_id')}) is carrying a bag/backpack{acc_str}."
             else:
                 summary = f"No, the detected person (Track #{top_match.get('tracking_id')}) is verified without a bag or backpack."
-        elif intent == "YES_NO":
-            verdict = "YES"
+        top_frame = top_match.get("frame") or ""
+        evidence_present = bool(top_frame and os.path.exists(top_frame))
+        verified_prefix = "Verified " if evidence_present else "Candidate "
+        evidence_warning = "" if evidence_present else " (visual evidence unverified / missing on disk)"
+
+        if intent == "YES_NO":
+            verdict = "YES" if evidence_present else "UNCERTAIN"
             if total_matches > 1:
-                summary = f"Yes, {total_matches} instances of {desc} were detected across camera streams (Track #{top_match.get('tracking_id')} in {top_match['camera']} at {top_match['timestamp']:.2f}s, plus {total_matches - 1} more shown below)."
+                summary = f"Yes, {total_matches} instances of {desc} were detected across camera streams (Track #{top_match.get('tracking_id')} in {top_match['camera']} at {time_formatted_top}, plus {total_matches - 1} more shown below){evidence_warning}."
             else:
-                summary = f"Yes, {desc} was detected in {top_match['camera']} at {top_match['timestamp']:.2f}s (Track ID #{top_match.get('tracking_id')})."
+                summary = f"Yes, {desc} was detected in {top_match['camera']} at {time_formatted_top} (Track ID #{top_match.get('tracking_id')}){evidence_warning}."
         else:
-            verdict = "MATCH"
+            verdict = "MATCH" if evidence_present else "UNVERIFIED"
             if total_matches > 1:
                 plural_concept = f"{req_obj}s" if (req_obj and not req_obj.endswith("s")) else f"{c_name}s"
                 if req_obj == "person" or c_name == "person":
@@ -402,33 +500,38 @@ def execute_natural_language_query(request: QueryRequest):
                 col_prefix = f"{req_color} " if req_color else ""
                 mov_prefix = "moving " if (req_action == "moving" or (attr.get('is_moving') and req_obj in ("car", "vehicle"))) else ""
                 cam_label = f"in {camera_id}" if camera_id else "across camera streams"
-                summary = f"Found {total_matches} verified {col_prefix}{mov_prefix}{plural_concept} {cam_label} (Track #{top_match.get('tracking_id')} at {top_match['timestamp']:.2f}s, plus {total_matches - 1} more instances shown below)."
+                summary = f"Found {total_matches} {verified_prefix.lower()}{col_prefix}{mov_prefix}{plural_concept} {cam_label} (Track #{top_match.get('tracking_id')} at {time_formatted_top}, plus {total_matches - 1} more instances shown below){evidence_warning}."
             else:
-                summary = f"Verified {desc} detected in {top_match['camera']} (Track ID #{top_match.get('tracking_id')} at {top_match['timestamp']:.2f}s)."
+                summary = f"{verified_prefix}{desc} detected in {top_match['camera']} (Track ID #{top_match.get('tracking_id')} at {time_formatted_top}){evidence_warning}."
     else:
         # NO MATCH / NO
         verdict = "NO" if intent == "YES_NO" else "NO MATCH"
         reasons = []
-        if forbid_bag:
-            reasons.append("No person without bag could be reliably verified.")
+        time_ctx = f" {time_filter['label']}" if time_filter else ""
+        if "knife" in req_accessories or req_obj == "knife":
+            reasons.append(f"No knife or person carrying a knife was detected{time_ctx} in the searched records.")
+        elif requires_holding:
+            reasons.append(f"No person holding an object or accessory in hand was reliably detected{time_ctx} in the searched records.")
+        elif forbid_bag:
+            reasons.append(f"No person without bag could be reliably verified{time_ctx}.")
         elif req_accessories:
-            reasons.append(f"No person carrying {', '.join(req_accessories)} was reliably detected in the uploaded video.")
+            reasons.append(f"No person carrying {', '.join(req_accessories)} was reliably detected{time_ctx} in the searched records.")
         elif requires_bag:
-            reasons.append("No person carrying a bag or backpack was reliably detected in the uploaded video.")
+            reasons.append(f"No person carrying a bag or backpack was reliably detected{time_ctx} in the searched records.")
         elif req_upper_color and req_lower_color:
-            reasons.append(f"No person wearing {req_upper_color} shirt and {req_lower_color} pants was detected in the uploaded video.")
+            reasons.append(f"No person wearing {req_upper_color} shirt and {req_lower_color} pants was detected{time_ctx} in the searched records.")
         elif req_upper_color:
-            reasons.append(f"No person wearing a {req_upper_color} shirt was detected in the uploaded video.")
+            reasons.append(f"No person wearing a {req_upper_color} shirt was detected{time_ctx} in the searched records.")
         elif req_lower_color:
-            reasons.append(f"No person wearing {req_lower_color} pants was detected in the uploaded video.")
+            reasons.append(f"No person wearing {req_lower_color} pants was detected{time_ctx} in the searched records.")
         elif req_color and req_obj:
-            reasons.append(f"No {req_color} {req_obj} satisfying the requested attributes was reliably detected in the uploaded video.")
+            reasons.append(f"No {req_color} {req_obj} satisfying the requested attributes was reliably detected{time_ctx} in the searched records.")
         elif req_action and req_obj:
-            reasons.append(f"No {req_action} {req_obj} satisfying the requested constraints was reliably detected in the uploaded video.")
+            reasons.append(f"No {req_action} {req_obj} satisfying the requested constraints was reliably detected{time_ctx} in the searched records.")
         elif req_obj:
-            reasons.append(f"No {req_obj} was detected matching the specified constraints.")
+            reasons.append(f"No {req_obj} was detected matching the specified constraints{time_ctx}.")
         else:
-            reasons.append("No visual events matched the requested query.")
+            reasons.append(f"No visual events matched the requested query{time_ctx}.")
             
         summary = " ".join(reasons)
 
@@ -451,6 +554,8 @@ def execute_natural_language_query(request: QueryRequest):
         }
     }
 
+    _record_query_log(request.query, latency_ms, result_summary=summary, result_count=total_matches)
+
     return {
         "query": request.query,
         "verdict": verdict,
@@ -467,12 +572,29 @@ def execute_natural_language_query(request: QueryRequest):
         "latency_ms": latency_ms
     }
 
-def _record_query_log(query_text: str, latency_ms: float):
+def _record_query_log(
+    query_text: str,
+    latency_ms: float,
+    result_summary: Optional[str] = None,
+    result_count: Optional[int] = None
+):
     try:
         query_id = str(uuid.uuid4())
         execute_query(
-            "INSERT INTO queries (id, query_text, timestamp, latency) VALUES (?, ?, ?, ?)",
-            (query_id, query_text, time.time(), latency_ms)
+            "INSERT INTO queries (id, query_text, timestamp, latency, result_summary, result_count) VALUES (?, ?, ?, ?, ?, ?)",
+            (query_id, query_text, time.time(), latency_ms, result_summary, result_count)
         )
     except Exception as e:
         logger.warning(f"Failed to record query in DB: {e}")
+
+@router.get("/queries/history")
+def get_queries_history(limit: int = 50):
+    rows = execute_query(
+        "SELECT * FROM queries ORDER BY timestamp DESC LIMIT ?",
+        (limit,),
+        fetch=True
+    ) or []
+    return {
+        "count": len(rows),
+        "history": [dict(r) for r in rows]
+    }

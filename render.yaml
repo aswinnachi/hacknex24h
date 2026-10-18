@@ -1,0 +1,22 @@
+services:
+  - type: web
+    name: ai-vision-security-backend
+    env: docker
+    dockerfilePath: ./Dockerfile
+    region: oregon
+    plan: standard
+    disk:
+      name: ai-vision-data
+      mountPath: /data
+      sizeGB: 20
+    envVars:
+      - key: APP_ENV
+        value: production
+      - key: APP_DEBUG
+        value: false
+      - key: DATABASE_URL
+        value: sqlite:////data/app.db
+      - key: STORAGE_LOCAL_DIR
+        value: /data/storage
+      - key: MAX_UPLOAD_SIZE_MB
+        value: "250.0"

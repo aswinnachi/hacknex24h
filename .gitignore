@@ -56,5 +56,10 @@ data/clips/*
 data/frames/*
 data/debug_frames/*
 data/vector_index/*
+data/storage/*
+data/storage_test/*
+data/lab_processing/*
+*.log
+database/*.db*
 !data/.keep
 !database/.keep

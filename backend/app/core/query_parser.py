@@ -1,5 +1,6 @@
 import re
 import time
+from datetime import datetime, timedelta
 from typing import Optional, Dict, Any, List, Tuple
 from backend.app.core.logging import logger
 from backend.app.db.database import execute_query
@@ -25,6 +26,7 @@ OBJECT_ALIASES = {
     "umbrella": ["umbrella", "umbrellas", "parasol"],
     "phone": ["phone", "phones", "cellphone", "mobile", "smartphone"],
     "bottle": ["bottle", "bottles", "cup", "tumbler"],
+    "knife": ["knife", "knives", "blade", "dagger", "machete", "weapon", "weapons"],
     "helmet": ["helmet", "helmets"],
     "hat": ["hat", "hats", "cap"],
     "glasses": ["glasses", "sunglasses", "spectacles"]
@@ -34,7 +36,8 @@ STOP_WORDS = [
     "find", "show", "me", "search", "for", "look", "can", "you", "did", "a", "an", "the",
     "any", "all", "is", "there", "are", "see", "pass", "through", "passing", "moving",
     "detected", "appear", "appeared", "in", "at", "on", "from", "to", "please", "tell",
-    "what", "where", "which", "how", "many", "count", "were", "happened", "occurred"
+    "what", "where", "which", "how", "many", "count", "were", "happened", "occurred",
+    "was", "same", "between", "both", "across"
 ]
 
 class QueryParser:
@@ -59,18 +62,23 @@ class QueryParser:
         # 4. Extract Clothing Attributes (Upper and Lower)
         upper_color, upper_type, lower_color, lower_type = self._extract_clothing_attributes(cleaned_query)
 
-        # 5. Extract Carried Objects & Negative Attributes
-        sec_obj, relation, requires_bag, forbid_bag, req_accessories, forbid_accessories = self._extract_accessories_and_relations(cleaned_query)
+        # 5. Extract Carried Objects, Weapons & Negative Attributes
+        sec_obj, relation, requires_bag, forbid_bag, req_accessories, forbid_accessories, requires_holding = self._extract_accessories_and_relations(cleaned_query)
 
-        # 6. Resolve Memory References / Clarify-Once
+        # 6. Extract Cameras (Single & Multi-Camera / Cross-Camera)
+        camera_id, camera_label, detected_cameras, cleaned_query = self._extract_cameras(cleaned_query)
+
+        # If multiple cameras detected or cross-camera keywords, set CROSS_CAMERA intent
+        if len(detected_cameras) >= 2 or (len(detected_cameras) == 1 and intent == "CROSS_CAMERA"):
+            intent = "CROSS_CAMERA"
+
+        # 7. Resolve Memory References / Clarify-Once
         mem_mgr = get_memory_manager()
         matched_mem, unknown_location = mem_mgr.resolve_location(cleaned_query)
         resolved_memory = None
         needs_clarification = False
         clarification_prompt = None
         missing_reference = None
-        camera_id = None
-        camera_label = None
 
         if matched_mem:
             resolved_memory = {
@@ -79,24 +87,28 @@ class QueryParser:
                 "camera_id": matched_mem["camera_id"],
                 "region": matched_mem.get("region")
             }
-            camera_id = matched_mem["camera_id"]
-            camera_label = f"Memory: {matched_mem['key_name']} ({matched_mem['camera_id']})"
+            if not camera_id:
+                camera_id = matched_mem["camera_id"]
+                camera_label = f"Memory: {matched_mem['key_name']} ({matched_mem['camera_id']})"
             cleaned_query = cleaned_query.replace(matched_mem["key_name"], " ")
         else:
-            camera_id, camera_label, cleaned_query = self._extract_camera(cleaned_query)
             if not camera_id and unknown_location:
-                if intent != "TEMPORAL_SEARCH" and intent != "INVENTORY":
+                if intent not in ("TEMPORAL_SEARCH", "INVENTORY"):
                     needs_clarification = True
                     missing_reference = unknown_location
                     clarification_prompt = f"I don't know which camera/region represents '{unknown_location}'. Please select it."
 
-        # 7. Extract Dominant Color if not already extracted in clothing
+        # 8. Extract Dominant Color if not already extracted in clothing
         color = upper_color or self._extract_color(cleaned_query)
 
-        # 8. Extract Canonical Object Class
+        # 9. Extract Canonical Object Class
         obj = self._extract_object(cleaned_query)
 
-        # 9. Structured Constraints (Positive & Negative)
+        # If knife was requested as accessory and no main obj, set knife as object or person holding knife
+        if "knife" in req_accessories and not obj:
+            obj = "person"
+
+        # 10. Structured Constraints (Positive & Negative)
         required_objects = [obj] if obj else []
         forbidden_objects = []
         if forbid_bag:
@@ -125,7 +137,7 @@ class QueryParser:
         if forbid_accessories:
             forbidden_attributes.extend(forbid_accessories)
 
-        # 10. Extract Visual Concept for Embedding
+        # 11. Extract Visual Concept for Embedding
         visual_concept = self._extract_visual_concept(cleaned_query, color, obj, sec_obj if not forbid_bag else None, original_query)
 
         return {
@@ -133,6 +145,7 @@ class QueryParser:
             "intent": intent,
             "camera": camera_id,
             "camera_label": camera_label,
+            "cross_camera_list": detected_cameras if len(detected_cameras) >= 2 else None,
             "resolved_memory": resolved_memory,
             "needs_clarification": needs_clarification,
             "clarification_prompt": clarification_prompt,
@@ -149,6 +162,7 @@ class QueryParser:
             "relation": relation,
             "requires_bag": requires_bag,
             "forbid_bag": forbid_bag,
+            "requires_holding_object": requires_holding,
             "required_accessories": req_accessories,
             "forbidden_accessories": forbid_accessories,
             "required_objects": required_objects,
@@ -159,13 +173,16 @@ class QueryParser:
         }
 
     def _classify_intent(self, text: str) -> str:
+        # Cross-camera intent pattern
+        if re.search(r"\b(?:same\s+(?:\w+\s+)?(?:seen|appear|detected)\s+(?:on|in|across)|between\s+camera|on\s+camera\s*\d+\s+and\s+camera\s*\d+|across\s+(?:both|different|multiple)?\s*cameras?)\b", text):
+            return "CROSS_CAMERA"
         if re.search(r"\b(?:how many|count\b|number of|total number|total count|total)\b", text):
             return "COUNT"
         if re.search(r"\b(?:what objects|what was detected|list objects|inventory|what is in the video)\b", text):
             return "INVENTORY"
         if re.search(r"\b(?:what happened|what occurred|show what happened)\b", text):
             return "TEMPORAL_SEARCH"
-        if re.search(r"\b(?:did a|did the|is there a|was there a|can you see a|has a|any)\b", text) and text.endswith("?"):
+        if re.search(r"\b(?:did a|did the|is there a|was there a|can you see a|has a|any|was anyone)\b", text) and text.endswith("?"):
             return "YES_NO"
         if re.search(r"^(?:did\b|is\b|was\b|has\b|are\b|can\b)", text):
             return "YES_NO"
@@ -182,7 +199,7 @@ class QueryParser:
             return "sitting"
         if re.search(r"\b(?:stopped|parked|stationary|standing|stands)\b", text):
             return "stationary"
-        if re.search(r"\b(?:moving|in motion|passed|passing|driving|entering|entered|exiting|exited)\b", text):
+        if re.search(r"\b(?:moving|in motion|driving|entering|entered|exiting|exited)\b", text):
             return "moving"
         return None
 
@@ -192,7 +209,7 @@ class QueryParser:
         lower_color = None
         lower_type = None
 
-        # Upper clothing patterns: e.g. "white shirt", "wearing a white shirt", "wearing red jacket", "black t-shirt"
+        # Upper clothing patterns
         for col in COLORS:
             if re.search(rf"\b(?:wearing\s+(?:a\s+)?)?{col}\s+(?:shirt|t-shirt|jacket|hoodie|coat|top|tshirt|sweater)\b", text):
                 upper_color = col
@@ -203,7 +220,7 @@ class QueryParser:
                 upper_type = "shirt"
                 break
 
-        # Lower clothing patterns: e.g. "black pants", "wearing blue jeans", "wearing dark trousers"
+        # Lower clothing patterns
         for col in COLORS:
             if re.search(rf"\b{col}\s+(?:pants|jeans|trousers|shorts|skirt)\b", text):
                 lower_color = col
@@ -212,17 +229,28 @@ class QueryParser:
 
         return upper_color, upper_type, lower_color, lower_type
 
-    def _extract_accessories_and_relations(self, text: str) -> Tuple[Optional[str], Optional[str], bool, bool, List[str], List[str]]:
+    def _extract_accessories_and_relations(self, text: str) -> Tuple[Optional[str], Optional[str], bool, bool, List[str], List[str], bool]:
         sec_obj = None
         relation = None
         requires_bag = False
         forbid_bag = False
+        requires_holding = False
         req_accessories = []
         forbid_accessories = []
 
+        # Check holding an object in hand
+        if re.search(r"\b(?:holding (?:an? )?(?:object|item|something)|carrying (?:an? )?(?:object|item|something)|holding (?:anything|something) in (?:their|his|her)?\s*hand)\b", text):
+            requires_holding = True
+
         # Negative bag relations
         if re.search(r"\b(?:without a bag|without bag|without any bag|without backpack|without a backpack|without backpacks|no bag|no backpack|not carrying a bag|not carrying bag|not carrying any bag|not holding a bag|without luggage|without suitcase)\b", text):
-            return "bag", "without", False, True, [], ["bag", "backpack", "suitcase", "handbag"]
+            return "bag", "without", False, True, [], ["bag", "backpack", "suitcase", "handbag"], requires_holding
+
+        # Weapons / Knife
+        if re.search(r"\b(?:knife|knives|blade|dagger|machete|weapon|weapons)\b", text):
+            sec_obj = "knife"
+            relation = "carrying"
+            req_accessories.append("knife")
 
         # Positive specific accessories
         if re.search(r"\b(?:backpack|backpacks|pack)\b", text):
@@ -252,59 +280,136 @@ class QueryParser:
             sec_obj = "bottle"
             relation = "holding"
             req_accessories.append("bottle")
-        if re.search(r"\b(?:with a bag|with bag|with any bag|carrying a bag|carrying bag|carrying any bag|holding a bag|has a bag)\b", text):
+        if re.search(r"\b(?:with a bag|with bag|with any bag|carrying a bag|carrying bag|carrying any bag|carrying bags|holding a bag|has a bag)\b", text):
             sec_obj = "bag"
             relation = "carrying"
             requires_bag = True
             if not req_accessories:
                 req_accessories.append("bag")
 
-        return sec_obj, relation, requires_bag, forbid_bag, req_accessories, forbid_accessories
+        return sec_obj, relation, requires_bag, forbid_bag, req_accessories, forbid_accessories, requires_holding
 
-        # Negative bag relation (person without bag)
-        if re.search(r"\b(?:without a bag|without bag|without any bag|without backpack|without a backpack|without backpacks|no bag|no backpack|not carrying a bag|not carrying bag|not carrying any bag|not holding a bag|without luggage|without suitcase)\b", text):
-            return "bag", "without", False, True
+    def _extract_cameras(self, text: str) -> Tuple[Optional[str], Optional[str], List[str], str]:
+        detected_cams = []
+        remaining = text
 
-        return None, None, False, False
-
-    def _extract_camera(self, text: str) -> Tuple[Optional[str], Optional[str], str]:
         # Check for explicit 'all cameras' or 'across all cameras'
         all_cam_match = re.search(r"\b(?:across\s+all\s+cameras|in\s+all\s+cameras|all\s+cameras|every\s+camera)\b", text)
         if all_cam_match:
-            remaining = text[:all_cam_match.start()] + " " + text[all_cam_match.end():]
-            return "all", "All Cameras", " ".join(remaining.split())
+            rem = text[:all_cam_match.start()] + " " + text[all_cam_match.end():]
+            return "all", "All Cameras", ["all"], " ".join(rem.split())
 
-        patterns = [
-            (r"\b(?:in|on|at|from)?\s*camera\s*0*([0-9]+)\b", "camera"),
-            (r"\b(?:in|on|at|from)?\s*cam\s*0*([0-9]+)\b", "cam"),
-            (r"\b(?:in|on|at|from)?\s*camera_0*([0-9]+)\b", "camera_"),
+        # Patterns for camera IDs or numbers: e.g. "camera 1", "camera 3", "camera_01", "cam 2"
+        cam_patterns = [
+            r"\b(?:camera|cam)[_\s]*0*([0-9]+)\b"
         ]
-        
-        for pat, prefix in patterns:
-            match = re.search(pat, text)
-            if match:
-                cam_num = int(match.group(1))
-                camera_id = f"camera_{cam_num:02d}"
-                camera_label = f"Camera {cam_num}"
-                remaining = text[:match.start()] + " " + text[match.end():]
-                return camera_id, camera_label, " ".join(remaining.split())
 
+        found_matches = []
+        for pat in cam_patterns:
+            for m in re.finditer(pat, remaining):
+                cam_num = int(m.group(1))
+                cam_id = f"camera_{cam_num:02d}"
+                found_matches.append((m.start(), m.end(), cam_id, f"Camera {cam_num}"))
+
+        # Check existing cameras in DB to resolve exact IDs or friendly names
         try:
-            cameras = execute_query("SELECT id, name FROM cameras", fetch=True)
-            for cam in cameras:
-                cam_name = cam["name"].lower()
-                if cam_name in text:
-                    idx = text.find(cam_name)
-                    remaining = text[:idx] + " " + text[idx + len(cam_name):]
-                    return cam["id"], cam["name"], " ".join(remaining.split())
+            db_cams = execute_query("SELECT id, name FROM cameras", fetch=True) or []
+            for cam in db_cams:
+                c_id = cam["id"].lower()
+                c_name = cam["name"].lower()
+                # If specific ID appears in text
+                if c_id in remaining and not any(c_id == fm[2] for fm in found_matches):
+                    idx = remaining.find(c_id)
+                    found_matches.append((idx, idx + len(c_id), cam["id"], cam["name"]))
+                # If camera friendly name appears
+                elif c_name in remaining and not any(c_name in fm[3].lower() for fm in found_matches):
+                    idx = remaining.find(c_name)
+                    found_matches.append((idx, idx + len(c_name), cam["id"], cam["name"]))
         except Exception as e:
-            logger.warning(f"Error checking camera names: {e}")
+            logger.warning(f"Error checking camera names in query_parser: {e}")
 
-        return None, None, text
+        # Sort matches by start index
+        found_matches.sort(key=lambda x: x[0])
+        
+        # Deduplicate cameras
+        seen_ids = set()
+        unique_matches = []
+        for m in found_matches:
+            if m[2] not in seen_ids:
+                seen_ids.add(m[2])
+                unique_matches.append(m)
+
+        if unique_matches:
+            # Mask out found camera tokens from remaining text
+            # Replace from right to left to preserve offsets
+            for start, end, _, _ in reversed(unique_matches):
+                remaining = remaining[:start] + " " + remaining[end:]
+            
+            detected_cams = [m[2] for m in unique_matches]
+            if len(unique_matches) == 1:
+                return unique_matches[0][2], unique_matches[0][3], detected_cams, " ".join(remaining.split())
+            else:
+                combined_label = " and ".join(m[3] for m in unique_matches)
+                return None, combined_label, detected_cams, " ".join(remaining.split())
+
+        return None, None, [], text
 
     def _extract_time(self, text: str) -> Tuple[Optional[Dict[str, Any]], str]:
         ref_time = self._get_reference_time()
-        
+        is_epoch = (ref_time > 1000000.0)
+        now_dt = datetime.fromtimestamp(ref_time) if is_epoch else datetime.now()
+        start_of_today = datetime(now_dt.year, now_dt.month, now_dt.day, 0, 0, 0).timestamp() if is_epoch else 0.0
+
+        # 1. Clock time patterns: "after 5 PM", "after 5pm", "after 17:00", "before 3 PM", "between 2 PM and 5 PM"
+        after_match = re.search(r"\b(?:after|past|from)\s+([0-9]{1,2})(?::([0-9]{2}))?\s*(am|pm)?\b", text)
+        if after_match:
+            hr = int(after_match.group(1))
+            mn = int(after_match.group(2) or 0)
+            mer = (after_match.group(3) or "").lower()
+            if mer == "pm" and hr < 12: hr += 12
+            elif mer == "am" and hr == 12: hr = 0
+
+            if is_epoch:
+                min_t = start_of_today + hr * 3600 + mn * 60
+                max_t = start_of_today + 86400
+            else:
+                min_t = hr * 3600 + mn * 60
+                max_t = ref_time
+
+            remaining = text[:after_match.start()] + " " + text[after_match.end():]
+            label = f"after {hr:02d}:{mn:02d}"
+            return {
+                "type": "explicit",
+                "label": label,
+                "min_timestamp": min_t,
+                "max_timestamp": max_t
+            }, " ".join(remaining.split())
+
+        before_match = re.search(r"\b(?:before|prior\s+to|until)\s+([0-9]{1,2})(?::([0-9]{2}))?\s*(am|pm)?\b", text)
+        if before_match:
+            hr = int(before_match.group(1))
+            mn = int(before_match.group(2) or 0)
+            mer = (before_match.group(3) or "").lower()
+            if mer == "pm" and hr < 12: hr += 12
+            elif mer == "am" and hr == 12: hr = 0
+
+            if is_epoch:
+                min_t = start_of_today
+                max_t = start_of_today + hr * 3600 + mn * 60
+            else:
+                min_t = 0.0
+                max_t = hr * 3600 + mn * 60
+
+            remaining = text[:before_match.start()] + " " + text[before_match.end():]
+            label = f"before {hr:02d}:{mn:02d}"
+            return {
+                "type": "explicit",
+                "label": label,
+                "min_timestamp": min_t,
+                "max_timestamp": max_t
+            }, " ".join(remaining.split())
+
+        # 2. Relative time patterns
         relative_patterns = [
             (r"\b(?:in|during|over|for)?\s*(?:the\s*)?(?:last|past)\s*minute\b", 60, "last minute"),
             (r"\b(?:in|during|over|for)?\s*(?:the\s*)?(?:last|past)\s*1\s*minute\b", 60, "last minute"),
@@ -313,7 +418,8 @@ class QueryParser:
             (r"\b(?:in|during|over|for)?\s*(?:the\s*)?(?:last|past)\s*30\s*minutes\b", 1800, "last 30 minutes"),
             (r"\b(?:in|during|over|for)?\s*(?:the\s*)?(?:last|past)\s*(?:an|1)?\s*hour\b", 3600, "last hour"),
             (r"\b(?:in|during|over|for)?\s*(?:the\s*)?(?:last|past)\s*([0-9]+)\s*seconds\b", None, "seconds_var"),
-            (r"\b(?:in|during|over|for)?\s*(?:the\s*)?(?:last|past)\s*([0-9]+)\s*minutes\b", None, "minutes_var")
+            (r"\b(?:in|during|over|for)?\s*(?:the\s*)?(?:last|past)\s*([0-9]+)\s*minutes\b", None, "minutes_var"),
+            (r"\b(?:in|during|over|for)?\s*(?:the\s*)?(?:last|past)\s*([0-9]+)\s*hours\b", None, "hours_var")
         ]
 
         for pat, delta, label in relative_patterns:
@@ -326,9 +432,13 @@ class QueryParser:
                     mins = int(match.group(1))
                     delta = mins * 60
                     label = f"last {mins} minutes"
+                elif label == "hours_var":
+                    hrs = int(match.group(1))
+                    delta = hrs * 3600
+                    label = f"last {hrs} hours"
                     
                 min_t = max(0.0, ref_time - delta)
-                max_t = ref_time
+                max_t = ref_time + (60.0 if is_epoch else 0.0)
                 remaining = text[:match.start()] + " " + text[match.end():]
                 return {
                     "type": "relative",
@@ -338,26 +448,36 @@ class QueryParser:
                     "delta_seconds": delta
                 }, " ".join(remaining.split())
 
+        # 3. Calendar patterns: today, yesterday
         if re.search(r"\b(?:today)\b", text):
             match = re.search(r"\b(?:today)\b", text)
             remaining = text[:match.start()] + " " + text[match.end():]
+            min_t = start_of_today if is_epoch else 0.0
+            max_t = ref_time + 60.0 if is_epoch else ref_time
             return {
                 "type": "calendar",
                 "label": "today",
-                "min_timestamp": 0.0,
-                "max_timestamp": ref_time
+                "min_timestamp": min_t,
+                "max_timestamp": max_t
             }, " ".join(remaining.split())
 
         if re.search(r"\b(?:yesterday)\b", text):
             match = re.search(r"\b(?:yesterday)\b", text)
             remaining = text[:match.start()] + " " + text[match.end():]
+            if is_epoch:
+                min_t = start_of_today - 86400.0
+                max_t = start_of_today
+            else:
+                min_t = 0.0
+                max_t = 0.0
             return {
                 "type": "calendar",
                 "label": "yesterday",
-                "min_timestamp": 0.0,
-                "max_timestamp": 0.0
+                "min_timestamp": min_t,
+                "max_timestamp": max_t
             }, " ".join(remaining.split())
 
+        # 4. Explicit second ranges for uploaded video: "first 10 seconds", "between 5s and 15s"
         first_match = re.search(r"\b(?:in\s+)?(?:the\s+)?first\s+([0-9]+(?:\.[0-9]+)?)\s*(?:s|sec|seconds)?\b", text)
         if first_match:
             max_t = float(first_match.group(1))
@@ -405,7 +525,7 @@ class QueryParser:
             "stopped", "parked", "stationary", "standing", "stands",
             "moving", "motion", "passed", "passing", "driving", "entering", "entered", "exiting", "exited",
             "with", "without", "carrying", "having", "wearing", "in", "at", "on", "from", "to", "by", "of",
-            "shirt", "pants", "tshirt", "t-shirt", "clothes", "clothing", "jacket", "dress", "jeans"
+            "shirt", "pants", "tshirt", "t-shirt", "clothes", "clothing", "jacket", "dress", "jeans", "hand", "handbag"
         }
         for w in text.split():
             clean_w = re.sub(r"[^\w]", "", w.lower())
@@ -433,7 +553,11 @@ class QueryParser:
         try:
             row = execute_query("SELECT MAX(end_timestamp) as max_t FROM events", fetch=True, fetch_one=True)
             if row and row["max_t"] is not None and row["max_t"] > 0:
-                return float(row["max_t"])
+                max_t = float(row["max_t"])
+                # If there are live events (epoch time), use current system time
+                if max_t > 1000000.0:
+                    return time.time()
+                return max_t
         except Exception as e:
             logger.warning(f"Error querying max event timestamp: {e}")
         return 60.0

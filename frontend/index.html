@@ -3,336 +3,1321 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Multi-Stream Video Intelligence — HNX26EPS05</title>
+    <title>AI Vision Security — Smarter Surveillance. Safer Tomorrow.</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&family=Outfit:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="styles.css">
+    <script>
+        // Set your remote backend API base URL when deploying frontend separately (e.g. on Vercel)
+        // If left empty (""), the frontend uses relative /api calls (or Vercel proxy rewrites)
+        window.API_BASE_URL = window.API_BASE_URL || "";
+    </script>
 </head>
 <body>
-    <div class="app-layout">
-        <!-- HEADER -->
-        <header class="navbar">
-            <div class="brand">
-                <div class="brand-icon">
-                    <span class="pulse-dot"></span>
-                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                        <polygon points="23 7 16 12 23 17 23 7"></polygon>
-                        <rect x="1" y="5" width="15" height="14" rx="2" ry="2"></rect>
+    <div class="app-shell">
+        
+        <!-- ============================================================
+             1. LEFT SIDEBAR (Commercial AI Security Command)
+             ============================================================ -->
+        <aside class="sidebar">
+            <div class="sidebar-header">
+                <div class="brand-shield-icon">
+                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+                        <circle cx="12" cy="11" r="3"/>
                     </svg>
                 </div>
-                <div class="brand-text">
-                    <h1>HNX26EPS05</h1>
-                    <span class="sub-title">Multi-Stream Video Intelligence</span>
+                <div class="brand-details">
+                    <h1 class="brand-title">AI Vision Security</h1>
+                    <span class="brand-subtitle">Smarter Surveillance. Safer Tomorrow.</span>
                 </div>
             </div>
 
-            <div class="header-telemetry">
-                <!-- Camera Scope Selector -->
-                <div class="scope-selector-wrap">
-                    <span class="scope-label">Query Scope:</span>
-                    <select id="global-scope-select" class="scope-select">
-                        <option value="current">Current Camera Only</option>
-                        <option value="all">All Registered Cameras</option>
-                    </select>
-                </div>
-
-                <button class="btn-upload-nav" id="btn-upload-video-nav">
-                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
-                    Upload CCTV Video
+            <!-- Navigation Links -->
+            <nav class="sidebar-nav">
+                <span class="nav-section-title">Operations</span>
+                <button class="nav-item active" data-view="overview" id="nav-btn-overview">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+                    <span>Overview</span>
                 </button>
 
-                <button class="btn-reset-nav" id="btn-reset-data-nav" title="Reset all data & cameras">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>
-                    Reset Data
+                <button class="nav-item" data-view="video-lab" id="nav-btn-video-lab">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path><polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline><line x1="12" y1="22.08" x2="12" y2="12"></line></svg>
+                    <span>Video Intelligence Lab</span>
+                    <span class="nav-badge" style="background:var(--cyan-primary); color:#000; font-weight:700;">LAB</span>
                 </button>
 
-                <div class="badge status-pill" id="badge-backend">
-                    <span class="status-indicator"></span>
-                    <span id="backend-status-text">Backend: Initializing</span>
+                <button class="nav-item" data-view="live-monitoring" id="nav-btn-live">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="23 7 16 12 23 17 23 7"></polygon><rect x="1" y="5" width="15" height="14" rx="2" ry="2"></rect></svg>
+                    <span>Live Monitoring</span>
+                </button>
+
+                <button class="nav-item" data-view="cameras" id="nav-btn-cameras">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="2"/><path d="M16.24 7.76a6 6 0 0 1 0 8.49m-8.48-.01a6 6 0 0 1 0-8.49m11.31-2.82a10 10 0 0 1 0 14.14m-14.14 0a10 10 0 0 1 0-14.14"/></svg>
+                    <span>Cameras & Sources</span>
+                </button>
+
+                <button class="nav-item" data-view="ai-search" id="nav-btn-search">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v4m0 12v4M4.93 4.93l2.83 2.83m8.48 8.48l2.83 2.83M2 12h4m12 0h4M4.93 19.07l2.83-2.83m8.48-8.48l2.83-2.83"/><circle cx="12" cy="12" r="4"/></svg>
+                    <span>AI Search</span>
+                </button>
+
+                <span class="nav-section-title" style="margin-top: 10px;">Forensics & Rules</span>
+                <button class="nav-item" data-view="events" id="nav-btn-events">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                    <span>Detection Events</span>
+                </button>
+
+                <button class="nav-item" data-view="alerts" id="nav-btn-alerts">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"></path><path d="M13.73 21a2 2 0 0 1-3.46 0"></path></svg>
+                    <span>Alerts & Tripwires</span>
+                    <span class="nav-badge hidden" id="sidebar-alert-badge">0</span>
+                </button>
+
+                <button class="nav-item" data-view="analytics" id="nav-btn-analytics">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+                    <span>Analytics</span>
+                </button>
+
+                <button class="nav-item" data-view="settings" id="nav-btn-settings">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+                    <span>Settings</span>
+                </button>
+            </nav>
+
+            <!-- Bottom Connection Status -->
+            <div class="sidebar-footer">
+                <div class="system-status-indicator">
+                    <span class="status-dot" id="sidebar-status-dot"></span>
+                    <span id="sidebar-status-text">Backend: Online (MPS)</span>
                 </div>
-                <div class="badge info-pill" id="badge-hardware">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/><line x1="9" y1="1" x2="9" y2="4"/><line x1="15" y1="1" x2="15" y2="4"/><line x1="9" y1="20" x2="9" y2="23"/><line x1="15" y1="20" x2="15" y2="23"/><line x1="20" y1="9" x2="23" y2="9"/><line x1="20" y1="14" x2="23" y2="14"/><line x1="1" y1="9" x2="4" y2="9"/><line x1="1" y1="14" x2="4" y2="14"/></svg>
-                    <span id="hardware-text">Compute: MPS</span>
-                </div>
-                <div class="badge info-pill">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-                    <span id="indexed-events-count">Events: 0</span>
-                </div>
+                <div class="version-tag">AI Vision Security v1.4.0</div>
             </div>
-        </header>
+        </aside>
 
-        <!-- MAIN GRID WORKSPACE -->
-        <main class="main-grid">
-            
-            <!-- LEFT PANEL: CAMERAS, ANALYSIS REPORT & MEMORY -->
-            <aside class="panel left-panel">
-                <!-- Camera Feeds Section -->
-                <section class="panel-section">
-                    <div class="section-header">
-                        <h2>
-                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z"/><circle cx="12" cy="13" r="3"/></svg>
-                            Camera Streams
-                        </h2>
-                        <span class="count-badge" id="camera-count-badge">0 Active</span>
-                    </div>
-                    <div class="camera-list" id="camera-list">
-                        <div class="skeleton-loader">Loading cameras...</div>
-                    </div>
-                </section>
+        <!-- ============================================================
+             2. MAIN WRAPPER & TOP BAR
+             ============================================================ -->
+        <div class="main-wrapper">
+            <header class="top-nav">
+                <div class="nav-breadcrumbs">
+                    <span class="nav-page-title" id="top-nav-title">Overview</span>
+                    <span class="nav-page-crumb" id="top-nav-crumb">Dashboard</span>
+                </div>
 
-                <!-- Video Analysis Report Section -->
-                <section class="panel-section report-section" id="section-analysis-report">
-                    <div class="section-header">
-                        <h2>
-                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
-                            Video Analysis Report
-                        </h2>
+                <!-- Global Quick Search Bar -->
+                <div class="global-search-container">
+                    <svg class="search-icon-pos" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                    <input type="text" class="global-search-input" id="global-search-input" placeholder="Search cameras, events, or natural queries (e.g. 'white car')..." />
+                </div>
+
+                <!-- Top Right Status Indicators & Actions -->
+                <div class="top-nav-actions">
+                    <div class="realtime-clock" id="realtime-clock">--:--:--</div>
+
+                    <div class="badge-hardware-pill" id="badge-hardware">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/></svg>
+                        <span id="hardware-text">Compute: Apple MPS</span>
+                    </div>
+
+                    <!-- Hidden legacy bridge elements -->
+                    <div class="hidden" id="badge-backend"><span id="backend-status-text">Online</span></div>
+                    <span class="hidden" id="camera-count-badge">0 Active</span>
+                    <span class="hidden" id="indexed-events-count">Events: 0</span>
+
+                    <button class="btn-icon-nav" id="btn-top-alerts" title="View Active Alerts">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"></path><path d="M13.73 21a2 2 0 0 1-3.46 0"></path></svg>
+                        <span class="alert-dot-badge hidden" id="top-alerts-dot"></span>
+                    </button>
+
+                    <button class="btn-subtle" id="btn-reset-data-nav" style="color:var(--red-critical); border-color:rgba(255,65,108,0.4);" title="Reset all data">
+                        Reset Data
+                    </button>
+                </div>
+            </header>
+
+            <!-- ============================================================
+                 3. VIEW VIEWPORT (Dynamic View Switching)
+                 ============================================================ -->
+            <main class="view-viewport">
+                
+                <!-- --------------------------------------------------------
+                     VIEW 1: OVERVIEW DASHBOARD
+                     -------------------------------------------------------- -->
+                <div class="view-page active-view" id="view-overview">
+                    
+                    <!-- Top 5 Metrics Deck -->
+                    <section class="metrics-deck">
+                        <div class="metric-card accent-cyan">
+                            <div class="metric-icon-wrap">
+                                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="23 7 16 12 23 17 23 7"></polygon><rect x="1" y="5" width="15" height="14" rx="2" ry="2"></rect></svg>
+                            </div>
+                            <div class="metric-data">
+                                <span class="metric-value" id="metric-active-cameras">0</span>
+                                <span class="metric-label">Active Cameras</span>
+                            </div>
+                        </div>
+
+                        <div class="metric-card accent-amber">
+                            <div class="metric-icon-wrap">
+                                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/></svg>
+                            </div>
+                            <div class="metric-data">
+                                <span class="metric-value" id="metric-offline-cameras">0</span>
+                                <span class="metric-label">Offline Cameras</span>
+                            </div>
+                        </div>
+
+                        <div class="metric-card accent-violet">
+                            <div class="metric-icon-wrap">
+                                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+                            </div>
+                            <div class="metric-data">
+                                <span class="metric-value" id="metric-tracked-objects">0</span>
+                                <span class="metric-label">Tracked Objects</span>
+                            </div>
+                        </div>
+
+                        <div class="metric-card accent-green">
+                            <div class="metric-icon-wrap">
+                                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                            </div>
+                            <div class="metric-data">
+                                <span class="metric-value" id="metric-detection-events">0</span>
+                                <span class="metric-label">Detection Events</span>
+                            </div>
+                        </div>
+
+                        <div class="metric-card accent-red">
+                            <div class="metric-icon-wrap">
+                                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+                            </div>
+                            <div class="metric-data">
+                                <span class="metric-value" id="metric-critical-alerts">0</span>
+                                <span class="metric-label">Critical Alerts</span>
+                            </div>
+                        </div>
+                    </section>
+
+                    <!-- Main Grid: Live Camera Hero & Detections Panel -->
+                    <section class="dashboard-main-grid">
+                        <div class="overview-hero-card">
+                            <div class="card-header-bar">
+                                <div class="card-title-group">
+                                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="23 7 16 12 23 17 23 7"></polygon><rect x="1" y="5" width="15" height="14" rx="2" ry="2"></rect></svg>
+                                    <span id="overview-hero-title">Selected Camera Big Screen</span>
+                                    <span class="badge-live-tag" id="overview-stream-tag">● LIVE</span>
+                                </div>
+                                <div style="display:flex; align-items:center; gap:8px;">
+                                    <select id="overview-camera-select" class="filter-select-control" style="font-size:0.75rem; padding:4px 10px; background:var(--bg-elevated); border:1px solid var(--cyan-primary); border-radius:var(--radius-xs); color:var(--text-main);" title="Select camera to display on Big Screen"></select>
+                                    <button class="btn-subtle btn-sm" id="btn-goto-monitoring">Switch to Matrix View ➔</button>
+                                </div>
+                            </div>
+                            <div class="feed-viewport" id="overview-viewport">
+                                <video id="overview-video" class="feed-media hidden" controls autoplay playsinline muted loop></video>
+                                <img id="overview-live-img" class="feed-media hidden" alt="Primary Camera Stream" />
+                                <iframe id="overview-youtube-iframe" class="feed-media hidden" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>
+                                <canvas id="overview-canvas" class="feed-canvas"></canvas>
+                                <div class="feed-overlay-watermark" id="overview-watermark">
+                                    <span id="overview-cam-name">CAM: Loading...</span>
+                                    <span id="overview-cam-res">1080p @ 30fps</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Right Side Live Detections Panel -->
+                        <div class="live-detections-panel">
+                            <div class="card-header-bar">
+                                <div class="card-title-group">
+                                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 12h4m12 0h4"/></svg>
+                                    <span>Live Detections</span>
+                                </div>
+                                <span class="badge-live-tag" style="background:rgba(19,217,245,0.15); border-color:var(--cyan-primary); color:var(--cyan-primary);">Real-Time</span>
+                            </div>
+                            <div class="detections-filter-tabs">
+                                <button class="det-tab-btn active" data-filter="all">All</button>
+                                <button class="det-tab-btn" data-filter="person">Person</button>
+                                <button class="det-tab-btn" data-filter="vehicle">Vehicle</button>
+                                <button class="det-tab-btn" data-filter="other">Other</button>
+                            </div>
+                            <div class="detections-stream-list" id="overview-detections-list">
+                                <div class="empty-state" style="padding:20px; text-align:center; color:var(--text-muted); font-size:0.75rem;"><span class="spinner-inline" style="margin-right:8px;"></span>Loading live detections...</div>
+                            </div>
+                        </div>
+                    </section>
+
+                    <!-- Lower Section: Camera Status Matrix & Recent Alerts -->
+                    <section class="dashboard-lower-grid">
+                        <div class="panel-card">
+                            <div class="card-header-bar">
+                                <div class="card-title-group">
+                                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="2"/><path d="M16.24 7.76a6 6 0 0 1 0 8.49m-8.48-.01a6 6 0 0 1 0-8.49m11.31-2.82a10 10 0 0 1 0 14.14m-14.14 0a10 10 0 0 1 0-14.14"/></svg>
+                                    <span>Camera Sources Matrix</span>
+                                </div>
+                                <button class="btn-subtle btn-sm" id="btn-goto-sources">+ Manage Sources</button>
+                            </div>
+                            <div class="panel-body-padded">
+                                <div class="camera-list" id="overview-camera-matrix" style="display:grid; grid-template-columns:repeat(auto-fill, minmax(280px, 1fr)); gap:10px;"></div>
+                            </div>
+                        </div>
+
+                        <div class="panel-card">
+                            <div class="card-header-bar">
+                                <div class="card-title-group">
+                                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"></path><path d="M13.73 21a2 2 0 0 1-3.46 0"></path></svg>
+                                    <span>Recent Alerts</span>
+                                </div>
+                                <button class="btn-subtle btn-sm" id="btn-goto-alerts">All Alerts ➔</button>
+                            </div>
+                            <div class="panel-body-padded" id="overview-recent-alerts" style="display:flex; flex-direction:column; gap:8px;"></div>
+                        </div>
+                    </section>
+                </div>
+
+                <!-- --------------------------------------------------------
+                     VIEW 2: LIVE MONITORING (FLAGSHIP WORKSPACE)
+                     -------------------------------------------------------- -->
+                <div class="view-page" id="view-live-monitoring">
+                    <div class="monitoring-header-controls">
+                        <div class="grid-switcher-bar">
+                            <span style="font-size:0.7rem; font-weight:700; color:var(--text-muted); margin-right:4px;">LAYOUT:</span>
+                            <button class="btn-grid-layout" data-grid="1" id="grid-btn-1">1 Cam</button>
+                            <button class="btn-grid-layout" data-grid="2" id="grid-btn-2">2 Cams</button>
+                            <button class="btn-grid-layout active" data-grid="4" id="grid-btn-4">2x2 Matrix</button>
+                            <button class="btn-grid-layout" data-grid="6" id="grid-btn-6">3x2 Grid</button>
+                        </div>
+
+                        <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+                            <button class="btn-subtle" id="btn-connect-all-streams" title="Connect all visible feeds to AI detection in parallel" style="color:var(--emerald-status); border-color:rgba(52,211,153,0.3);">⚡ Connect All Feeds</button>
+                            <button class="btn-subtle" id="btn-toggle-multiview-mode" title="Direct YouTube playback with live AI tracking" style="color:var(--cyan-primary); border-color:var(--cyan-primary);">🤖 AI Analytics Mode</button>
+                            <button class="btn-subtle" id="btn-quick-add-stream" title="Add a new live stream or YouTube feed">+ Add Live Feed</button>
+                            <button class="btn-subtle active" id="btn-toggle-all-boxes">👁️ BBoxes: ON</button>
+                            <button class="btn-subtle" id="btn-play-full">🎬 Play Full Video</button>
+                            <button class="btn-subtle" id="btn-play-evidence">🎯 Evidence Clip</button>
+                            <button class="btn-subtle" id="btn-view-toggle">🖼️ Snapshot</button>
+                            <button class="btn-subtle" id="btn-toggle-draw-tool">📐 Draw Rule</button>
+                            <button class="btn-subtle hidden" id="btn-disconnect-active-cam" style="color:var(--red-critical); border-color:var(--red-critical);">Disconnect Feed</button>
+                        </div>
+                    </div>
+
+                    <!-- Interactive Drawing Overlay Bar -->
+                    <div class="drawing-toolbar hidden" id="drawing-toolbar" style="background:var(--bg-elevated); border:1px solid var(--cyan-primary); padding:10px 16px; border-radius:var(--radius-sm); display:flex; justify-content:space-between; align-items:center;">
+                        <div style="display:flex; align-items:center; gap:10px;">
+                            <span style="font-size:0.8rem; font-weight:700; color:var(--cyan-primary);">📐 CAD Geometry Editor:</span>
+                            <select id="draw-type-select" class="filter-select-control">
+                                <option value="tripwire_crossing">Virtual Tripwire (2 clicks for line)</option>
+                                <option value="zone_entry">Polygon Zone (3+ clicks)</option>
+                            </select>
+                            <span id="draw-points-count" style="font-size:0.72rem; color:var(--text-muted); font-family:var(--font-mono);">Click on video to place points (0 placed)</span>
+                        </div>
+                        <div style="display:flex; gap:6px;">
+                            <button class="btn-subtle btn-sm" id="btn-clear-drawing">Clear</button>
+                            <button class="btn-primary btn-sm" id="btn-save-drawn-rule">Create Rule</button>
+                            <button class="btn-subtle btn-sm" id="btn-cancel-drawing">Exit</button>
+                        </div>
+                    </div>
+
+                    <!-- Monitoring Main Layout: Grid Left + Detections Right -->
+                    <div class="monitoring-main-layout">
+                        <!-- Multi-Camera Matrix Grid -->
+                        <div class="camera-matrix-grid grid-4" id="monitoring-matrix-grid">
+                            <!-- Primary Dynamic Viewport -->
+                            <div class="camera-feed-card active-target" id="feed-card-primary">
+                                <div class="cam-feed-header">
+                                    <div class="cam-title-info">
+                                        <span id="feed-primary-name">Primary Camera</span>
+                                        <span class="cam-meta-pill" id="feed-primary-meta">1080p @ 30fps</span>
+                                    </div>
+                                    <div class="cam-feed-actions" id="feed-primary-actions">
+                                        <button class="feed-card-btn-action hidden" id="btn-primary-toggle-mode" title="Toggle AI detection vs Direct YouTube player">📺 Direct YT</button>
+                                        <span class="badge-live-tag" id="player-status-badge">● LIVE</span>
+                                    </div>
+                                </div>
+                                <div class="feed-viewport" id="media-viewport">
+                                    <video id="evidence-video" class="feed-media hidden" controls autoplay playsinline muted loop></video>
+                                    <img id="live-stream-img" class="feed-media hidden" alt="Live CCTV Stream" />
+                                    <iframe id="primary-youtube-iframe" class="feed-media hidden" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>
+                                    <img id="evidence-frame-img" class="feed-media hidden" alt="Evidence Frame" />
+                                    <canvas id="evidence-canvas" class="feed-canvas"></canvas>
+                                    <div class="feed-overlay-watermark" id="media-watermark">
+                                        <span id="watermark-cam">CAM: --</span>
+                                        <span id="watermark-time">TIME: --:--:--</span>
+                                    </div>
+                                    <div class="feed-hud-verdict-pill hidden" id="evidence-hud">
+                                        <div style="display:flex; align-items:center; gap:8px;">
+                                            <span class="verdict-tag-pill match" id="hud-verdict">STANDBY</span>
+                                            <span id="hud-summary" style="font-weight:600; color:var(--text-main);">Upload CCTV footage or run natural-language query</span>
+                                        </div>
+                                        <div style="display:flex; align-items:center; gap:12px; font-family:var(--font-mono); color:var(--text-muted); font-size:0.68rem;">
+                                            <div>CAM: <span id="hud-camera" style="color:var(--cyan-primary);">--</span></div>
+                                            <div>TIME: <span id="hud-timestamp" style="color:var(--text-main);">--:--:--</span></div>
+                                            <div>CONF: <span id="hud-relevance" style="color:var(--emerald-status);">--%</span></div>
+                                            <button id="btn-close-hud" style="background:none; border:none; color:var(--text-muted); cursor:pointer; font-size:1.1rem; line-height:1; padding:0 4px; pointer-events:auto;" title="Dismiss HUD">×</button>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            <!-- Dynamic additional camera cards will be rendered here -->
+                        </div>
+
+                        <!-- Right Side Live Detections Panel in Monitoring View -->
+                        <div class="live-detections-panel">
+                            <div class="card-header-bar">
+                                <div class="card-title-group">
+                                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 12h4m12 0h4"/></svg>
+                                    <span>Live Detection Stream</span>
+                                </div>
+                                <span class="badge-live-tag">Active</span>
+                            </div>
+                            <div class="detections-filter-tabs" id="monitoring-det-filter-tabs">
+                                <button class="det-tab-btn active" data-filter="all">All</button>
+                                <button class="det-tab-btn" data-filter="person">Person</button>
+                                <button class="det-tab-btn" data-filter="vehicle">Vehicle</button>
+                                <button class="det-tab-btn" data-filter="other">Other</button>
+                            </div>
+                            <div class="detections-stream-list" id="monitoring-detections-list">
+                                <div class="empty-state" style="padding:20px; text-align:center; color:var(--text-muted); font-size:0.75rem;"><span class="spinner-inline" style="margin-right:8px;"></span>Loading live detections...</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- --------------------------------------------------------
+                     VIEW 3: CAMERAS & SOURCES MANAGEMENT
+                     -------------------------------------------------------- -->
+                <div class="view-page" id="view-cameras">
+                    <div style="display:flex; justify-content:space-between; align-items:center; background:var(--bg-card); padding:16px 20px; border-radius:var(--radius-md); border:1px solid var(--border-color);">
+                        <div>
+                            <h2 style="font-family:var(--font-display); font-size:1.1rem; color:var(--text-main);">Connected Camera Streams</h2>
+                            <p style="font-size:0.75rem; color:var(--text-muted); margin-top:2px;">Manage live IP cameras, RTSP streams, YouTube Live, and uploaded CCTV footage.</p>
+                        </div>
+                        <div style="display:flex; gap:10px;">
+                            <button class="btn-cyan" id="btn-connect-camera-nav">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="2"/><path d="M16.24 7.76a6 6 0 0 1 0 8.49m-8.48-.01a6 6 0 0 1 0-8.49m11.31-2.82a10 10 0 0 1 0 14.14m-14.14 0a10 10 0 0 1 0-14.14"/></svg>
+                                <span>Connect Live Camera (YT / RTSP)</span>
+                            </button>
+                            <button class="btn-primary" id="btn-upload-video-nav">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                                <span>Upload CCTV Video</span>
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Camera Sources Grid -->
+                    <div class="camera-list" id="camera-list" style="display:grid; grid-template-columns:repeat(auto-fill, minmax(320px, 1fr)); gap:16px;"></div>
+                </div>
+
+                <!-- --------------------------------------------------------
+                     VIEW 4: AI CONVERSATIONAL SEARCH
+                     -------------------------------------------------------- -->
+                <div class="view-page" id="view-ai-search">
+                    <div class="ai-search-container">
+                        <div class="ai-query-hero-box">
+                            <div class="ai-search-title-row">
+                                <h2 class="ai-search-heading">
+                                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v4m0 12v4M4.93 4.93l2.83 2.83m8.48 8.48l2.83 2.83M2 12h4m12 0h4M4.93 19.07l2.83-2.83m8.48-8.48l2.83-2.83"/><circle cx="12" cy="12" r="4"/></svg>
+                                    <span>Conversational AI Video Intelligence</span>
+                                </h2>
+                                <span style="font-size:0.74rem; font-family:var(--font-mono); color:var(--violet-ai);" id="chat-latency-indicator">Latency: 0 ms</span>
+                            </div>
+
+                            <form id="query-form" class="ai-search-input-wrap">
+                                <input type="text" id="query-input" class="ai-search-input" placeholder="Ask questions about video events (e.g., 'Show moving white car', 'Find people with backpack', 'Count cars')..." autocomplete="off" required />
+                                <button type="submit" id="btn-submit-query" class="btn-ai-search-submit">
+                                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                                    <span>Search</span>
+                                </button>
+                            </form>
+
+                            <!-- Example Preset Chips -->
+                            <div class="query-presets-rail">
+                                <span style="font-size:0.7rem; color:var(--text-muted); font-weight:700;">SUGGESTIONS:</span>
+                                <button type="button" class="preset-chip-pill chip" data-query="Show the moving white car">🚗 Show moving white car</button>
+                                <button type="button" class="preset-chip-pill chip" data-query="Show the moving red car">🔴 Show red car (test reject)</button>
+                                <button type="button" class="preset-chip-pill chip" data-query="Show the person with a bag">🎒 Person with bag</button>
+                                <button type="button" class="preset-chip-pill chip" data-query="How many people passed through the camera?">👥 Count people</button>
+                                <button type="button" class="preset-chip-pill chip" data-query="How many cars passed through the camera?">🚘 Count cars</button>
+                                <button type="button" class="preset-chip-pill chip" data-query="Did the white car pass?">✅ Did white car pass?</button>
+                            </div>
+                        </div>
+
+                        <!-- Ambiguous Landmark Clarify-Once Card -->
+                        <div class="clarification-card hidden" id="clarification-card" style="background:rgba(255,181,46,0.12); border:1px solid var(--amber-warning); padding:16px; border-radius:var(--radius-md);">
+                            <div style="display:flex; align-items:center; gap:8px; color:var(--amber-warning); margin-bottom:8px;">
+                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+                                <h3 style="font-family:var(--font-display); font-size:0.9rem;">Clarify-Once Needed</h3>
+                            </div>
+                            <p id="clarification-prompt-text" style="font-size:0.8rem; color:var(--text-secondary); margin-bottom:12px;">Unknown spatial landmark location. Please select camera and ROI.</p>
+                            <div style="display:flex; gap:10px; margin-bottom:12px;">
+                                <select id="clarify-camera-select" class="filter-select-control"></select>
+                                <select id="clarify-region-preset" class="filter-select-control">
+                                    <option value="full">Full Camera View [0, 0, 768, 432]</option>
+                                    <option value="left">Left Gate Region [0, 100, 384, 432]</option>
+                                    <option value="right">Right Road Region [384, 100, 768, 432]</option>
+                                </select>
+                            </div>
+                            <div style="display:flex; gap:8px;">
+                                <button class="btn-primary btn-sm" id="btn-save-clarification">Save Memory & Search</button>
+                                <button class="btn-subtle btn-sm" id="btn-cancel-clarification">Dismiss</button>
+                            </div>
+                        </div>
+
+                        <!-- Chat & Query Results Container -->
+                        <div class="chat-messages" id="chat-messages" style="display:flex; flex-direction:column; gap:12px;"></div>
+                    </div>
+                </div>
+
+                <!-- --------------------------------------------------------
+                     VIEW 5: DETECTION EVENTS FORENSICS
+                     -------------------------------------------------------- -->
+                <div class="view-page" id="view-events">
+                    <div class="events-filter-toolbar">
+                        <select id="timeline-cam-select" class="filter-select-control">
+                            <option value="all">All Cameras</option>
+                        </select>
+                        <select id="timeline-source-select" class="filter-select-control">
+                            <option value="all">All Sources</option>
+                            <option value="youtube_live">YouTube Live</option>
+                            <option value="live">Live / RTSP</option>
+                            <option value="uploaded">Uploaded CCTV</option>
+                        </select>
+                        <select id="timeline-class-select" class="filter-select-control">
+                            <option value="all">All Objects</option>
+                            <option value="person">Person</option>
+                            <option value="car">Car</option>
+                            <option value="truck">Truck</option>
+                            <option value="bus">Bus</option>
+                            <option value="bicycle">Bicycle</option>
+                            <option value="motorcycle">Motorcycle</option>
+                            <option value="backpack">Backpack</option>
+                        </select>
+                        <select id="timeline-time-select" class="filter-select-control">
+                            <option value="all">All Time</option>
+                            <option value="5m">Last 5 Min</option>
+                            <option value="15m">Last 15 Min</option>
+                            <option value="1h">Last 1 Hour</option>
+                        </select>
+                        <input type="text" id="timeline-track-input" class="filter-text-input" placeholder="Track #ID..." style="width:100px;" />
+                        <button id="btn-refresh-timeline" class="btn-primary btn-sm" style="margin-left:auto;">↻ Refresh Events</button>
+                    </div>
+
+                    <!-- Event Cards Grid -->
+                    <div class="timeline-track events-cards-grid" id="timeline-track">
+                        <div class="skeleton-loader" style="color:var(--text-muted); font-size:0.8rem; padding:20px;">Loading historical events...</div>
+                    </div>
+                </div>
+
+                <!-- --------------------------------------------------------
+                     VIEW 6: ALERTS & TRIPWIRES
+                     -------------------------------------------------------- -->
+                <div class="view-page" id="view-alerts">
+                    <div style="display:flex; justify-content:space-between; align-items:center; background:var(--bg-card); padding:14px 20px; border-radius:var(--radius-md); border:1px solid var(--border-color);">
+                        <div>
+                            <h2 style="font-family:var(--font-display); font-size:1.1rem; color:var(--text-main);">Security Alerts & Tripwires</h2>
+                            <p style="font-size:0.75rem; color:var(--text-muted); margin-top:2px;">Real-time perimeter intrusion monitoring and automated tripwire rule execution.</p>
+                        </div>
+                        <div style="display:flex; gap:10px;">
+                            <button class="btn-primary" id="btn-alert-rules-nav">+ Configure Alert Rules</button>
+                            <button class="btn-subtle" id="btn-alerts-history-nav">Alert History Log</button>
+                        </div>
+                    </div>
+
+                    <!-- Alerts Main View -->
+                    <div class="alerts-hub-layout">
+                        <div class="alerts-table-card">
+                            <div class="card-header-bar">
+                                <div class="card-title-group">
+                                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"></path><path d="M13.73 21a2 2 0 0 1-3.46 0"></path></svg>
+                                    <span>Active Alerts Queue</span>
+                                </div>
+                                <button class="btn-subtle btn-sm" id="btn-refresh-alerts-queue">↻ Refresh</button>
+                            </div>
+                            <div style="overflow-x:auto;">
+                                <table class="alerts-data-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Severity</th>
+                                            <th>Rule Triggered</th>
+                                            <th>Camera Source</th>
+                                            <th>Timestamp</th>
+                                            <th>Object / Track</th>
+                                            <th>Status</th>
+                                            <th>Actions</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="alerts-hub-table-body">
+                                        <tr>
+                                            <td colspan="7" style="text-align:center; padding:24px; color:var(--text-muted);">No active security alerts. System normal.</td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+
+                        <!-- Right Side: Configured Tripwire Rules Summary -->
+                        <div class="panel-card">
+                            <div class="card-header-bar">
+                                <div class="card-title-group">
+                                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+                                    <span>Configured Rules (<span id="rule-count-summary">0</span>)</span>
+                                </div>
+                            </div>
+                            <div class="panel-body-padded" id="rules-summary-list" style="display:flex; flex-direction:column; gap:8px;"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- --------------------------------------------------------
+                     VIEW 7: ANALYTICS & SCENE REPORT
+                     -------------------------------------------------------- -->
+                <div class="view-page" id="view-analytics">
+                    <div class="card-header-bar" style="background:var(--bg-card); border-radius:var(--radius-md); border:1px solid var(--border-color); padding:16px;">
+                        <div class="card-title-group">
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+                            <h2 style="font-size:1.1rem; color:var(--text-main);">Surveillance Analytics & Scene Intelligence</h2>
+                        </div>
                         <span class="status-tag-verified" id="report-source-badge">No Camera Selected</span>
                     </div>
-                    <div class="analysis-report-container" id="analysis-report-box">
-                        <div class="report-meta" id="report-meta">
-                            <div><strong>Source:</strong> <span id="rep-filename">--</span></div>
-                            <div><strong>Duration:</strong> <span id="rep-duration">--</span></div>
-                            <div><strong>Resolution:</strong> <span id="rep-resolution">--</span></div>
-                            <div><strong>FPS:</strong> <span id="rep-fps">--</span></div>
-                        </div>
-                        <div class="report-objects" id="report-objects-list">
-                            <div class="empty-state">Select a camera to view its grounded analysis report.</div>
-                        </div>
-                    </div>
-                </section>
 
-                <!-- Persistent Memory (Clarify-Once) Section -->
-                <section class="panel-section memory-section">
-                    <div class="section-header">
-                        <h2>
-                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>
-                            Clarify-Once Memory
-                        </h2>
-                        <button class="btn-icon" id="btn-add-memory" title="Add Landmark Memory">+</button>
-                    </div>
-                    <div class="memory-list" id="memory-list">
-                        <div class="empty-state">No persistent memories saved yet.</div>
-                    </div>
-                </section>
-            </aside>
-
-            <!-- CENTER PANEL: EVIDENCE & VIDEO PLAYER -->
-            <section class="panel center-panel">
-                <div class="evidence-header">
-                    <div class="evidence-title">
-                        <h2>Visual Evidence Player</h2>
-                        <span class="badge live-badge" id="player-status-badge">STANDBY</span>
-                    </div>
-                    <div class="player-controls-meta">
-                        <button class="btn-subtle active" id="btn-toggle-all-boxes" title="Toggle between showing all detected scene objects and only the queried target">👁️ All Objects: ON</button>
-                        <button class="btn-subtle" id="btn-play-full" title="Play complete unclipped source video">🎬 Play Full Video</button>
-                        <button class="btn-subtle" id="btn-play-evidence" title="Play targeted visual evidence clip">🎯 Play Evidence</button>
-                        <button class="btn-subtle" id="btn-view-toggle">🖼️ Frame View</button>
-                    </div>
-                </div>
-
-                <!-- Video / Frame Canvas Display Area -->
-                <div class="media-container" id="media-viewport">
-                    <video id="evidence-video" class="media-element" controls autoplay playsinline muted loop>
-                        Your browser does not support HTML5 video streaming.
-                    </video>
-                    <img id="evidence-frame-img" class="media-element frame-overlay hidden" alt="Evidence Frame" />
-                    <canvas id="evidence-canvas" class="canvas-overlay"></canvas>
-                    <div class="media-watermark" id="media-watermark">
-                        <span id="watermark-cam">CAM: --</span>
-                        <span id="watermark-time">TIME: --:--:--</span>
-                    </div>
-                </div>
-
-                <!-- Grounded Verdict HUD Card -->
-                <div class="evidence-hud" id="evidence-hud">
-                    <div class="hud-main">
-                        <div class="verdict-banner" id="verdict-banner">
-                            <span class="verdict-tag" id="hud-verdict">STANDBY</span>
-                            <h3 id="hud-summary">Upload CCTV footage or run a natural-language query to view verified evidence.</h3>
-                        </div>
-                    </div>
-
-                    <div class="hud-metrics">
-                        <div class="metric-item">
-                            <span class="metric-label">Target Camera</span>
-                            <span class="metric-value" id="hud-camera">--</span>
-                        </div>
-                        <div class="metric-item">
-                            <span class="metric-label">CCTV Wall Time</span>
-                            <span class="metric-value font-mono" id="hud-timestamp">--:--:--</span>
-                        </div>
-                        <div class="metric-item">
-                            <span class="metric-label">Video Offset</span>
-                            <span class="metric-value font-mono" id="hud-offset">0.00s</span>
-                        </div>
-                        <div class="metric-item">
-                            <span class="metric-label">Relevance / Conf</span>
-                            <span class="metric-value highlight" id="hud-relevance">--%</span>
-                        </div>
-                        <div class="metric-item">
-                            <span class="metric-label">Clip Window</span>
-                            <span class="metric-value font-mono" id="hud-clip-window">-- ➔ --</span>
-                        </div>
-                    </div>
-                </div>
-            </section>
-
-            <!-- RIGHT PANEL: CONVERSATIONAL QUERY CHAT -->
-            <section class="panel right-panel">
-                <div class="panel-section chat-section">
-                    <div class="section-header">
-                        <h2>
-                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
-                            Conversational Query Engine
-                        </h2>
-                        <span class="latency-indicator" id="chat-latency-indicator">Latency: -- ms</span>
-                    </div>
-
-                    <!-- Chat Message History -->
-                    <div class="chat-messages" id="chat-messages">
-                        <div class="chat-bubble assistant-bubble">
-                            <div class="bubble-header">
-                                <span class="assistant-name">SYSTEM AI</span>
-                                <span class="bubble-time">Grounded Engine Ready</span>
+                    <!-- Grounded Scene Intelligence Report Card -->
+                    <div class="panel-card" id="section-analysis-report">
+                        <div class="card-header-bar">
+                            <div class="card-title-group">
+                                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+                                <span>Grounded Video Analysis Report</span>
                             </div>
-                            <div class="bubble-body">
-                                <p>Ask natural-language questions about uploaded CCTV streams. Examples:</p>
-                                <ul style="margin-top: 6px; padding-left: 18px; font-size: 0.8rem; color: var(--text-secondary);">
-                                    <li><em>"Show the moving white car"</em></li>
-                                    <li><em>"Show the moving red car" (strict negative rejection)</em></li>
-                                    <li><em>"Show the person with a bag" (verifies bag association)</em></li>
-                                    <li><em>"How many people passed through the camera?"</em></li>
-                                    <li><em>"What objects were detected?"</em></li>
-                                </ul>
+                        </div>
+                        <div class="panel-body-padded">
+                            <div class="report-meta" id="report-meta" style="display:grid; grid-template-columns:repeat(4, 1fr); gap:12px; margin-bottom:14px; font-size:0.78rem;">
+                                <div><strong>Source:</strong> <span id="rep-filename">--</span></div>
+                                <div><strong>Duration:</strong> <span id="rep-duration">--</span></div>
+                                <div><strong>Resolution:</strong> <span id="rep-resolution">--</span></div>
+                                <div><strong>FPS:</strong> <span id="rep-fps">--</span></div>
+                            </div>
+                            <h4 style="font-size:0.75rem; text-transform:uppercase; color:var(--text-muted); margin-bottom:8px;">Detected Object Class Inventory:</h4>
+                            <div class="report-objects" id="report-objects-list" style="display:grid; grid-template-columns:repeat(auto-fill, minmax(200px, 1fr)); gap:8px;">
+                                <div class="empty-state" style="color:var(--text-muted); font-size:0.78rem;">Select a camera to view its grounded analysis report.</div>
                             </div>
                         </div>
                     </div>
 
-                    <!-- Clarification Interactive Card (Shown when unknown reference detected) -->
-                    <div class="clarification-card hidden" id="clarification-card">
-                        <div class="clarification-header">
-                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#f59e0b" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
-                            <h3>Clarify-Once Needed</h3>
+                    <!-- Clarify-Once Memory Section -->
+                    <div class="panel-card memory-section">
+                        <div class="card-header-bar">
+                            <div class="card-title-group">
+                                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></svg>
+                                <span>Clarify-Once Persistent Landmark Memory</span>
+                            </div>
+                            <button class="btn-primary btn-sm" id="btn-add-memory">+ Add Landmark</button>
                         </div>
-                        <p id="clarification-prompt-text">I don't know which camera/region represents this location. Please select it.</p>
-                        
-                        <div class="clarification-inputs">
-                            <label for="clarify-camera-select">Assign Camera:</label>
-                            <select id="clarify-camera-select" class="custom-select"></select>
+                        <div class="panel-body-padded">
+                            <div class="memory-list" id="memory-list" style="display:grid; grid-template-columns:repeat(auto-fill, minmax(260px, 1fr)); gap:10px;">
+                                <div class="empty-state" style="color:var(--text-muted); font-size:0.78rem;">No persistent landmark memories saved.</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
 
-                            <label for="clarify-region-preset">Spatial ROI:</label>
-                            <select id="clarify-region-preset" class="custom-select">
-                                <option value="full">Full Camera View [0, 0, 768, 432]</option>
-                                <option value="left">Left Gate Region [0, 100, 384, 432]</option>
-                                <option value="right">Right Road Region [384, 100, 768, 432]</option>
-                                <option value="center">Central Roadway [150, 150, 600, 432]</option>
-                            </select>
+                <!-- --------------------------------------------------------
+                     VIEW 8: SETTINGS & SYSTEM DIAGNOSTICS
+                     -------------------------------------------------------- -->
+                <div class="view-page" id="view-settings">
+                    <div class="panel-card" style="max-width:800px; margin:0 auto; width:100%;">
+                        <div class="card-header-bar">
+                            <div class="card-title-group">
+                                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+                                <span>Platform Preferences & Storage</span>
+                            </div>
+                        </div>
+                        <div class="panel-body-padded" style="display:flex; flex-direction:column; gap:16px;">
+                            <div class="form-group">
+                                <label>Default Camera Scope for Queries:</label>
+                                <select id="global-scope-select" class="filter-select-control">
+                                    <option value="current">Current Selected Camera</option>
+                                    <option value="all">All Registered Cameras (Cross-Camera)</option>
+                                </select>
+                            </div>
+
+                            <div class="form-group">
+                                <label>Hardware Device Acceleration:</label>
+                                <input type="text" value="Apple Silicon MPS (Metal Performance Shaders) / PyTorch 2.2+" disabled style="opacity:0.7;" />
+                            </div>
+
+                            <div class="form-group">
+                                <label>Visual Object Detection Model:</label>
+                                <input type="text" value="YOLO-World (Open-Vocabulary Zero-Shot Object Detection)" disabled style="opacity:0.7;" />
+                            </div>
+
+                            <div class="form-group">
+                                <label>Multi-Camera Re-ID & Embeddings:</label>
+                                <input type="text" value="Google SigLIP (google/siglip-base-patch16-224) 768-dim Vector Space" disabled style="opacity:0.7;" />
+                            </div>
+
+                            <div style="border-top:1px solid var(--border-color); padding-top:16px; margin-top:8px;">
+                                <h4 style="color:var(--red-critical); font-size:0.85rem; margin-bottom:6px;">Danger Zone: Reset All Storage</h4>
+                                <p style="font-size:0.74rem; color:var(--text-muted); margin-bottom:10px;">Purges all uploaded video files, live clips, FAISS indexes, detected tracking records, and resets the database.</p>
+                                <button class="btn-danger" id="btn-settings-reset">Reset All Data & Indices</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- --------------------------------------------------------
+                     VIEW 9: VIDEO INTELLIGENCE LAB (Public Video Upload & ByteTrack Tracking)
+                     -------------------------------------------------------- -->
+                <div class="view-page" id="view-video-lab">
+                    <div class="lab-header-banner">
+                        <div class="lab-header-title-wrap">
+                            <div class="lab-header-icon">
+                                <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path><polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline><line x1="12" y1="22.08" x2="12" y2="12"></line></svg>
+                            </div>
+                            <div>
+                                <h2 class="lab-title">Video Intelligence Lab</h2>
+                                <p class="lab-subtitle">Public CCTV Video Ingestion, Zero-Shot YOLO-World Object Detection & ByteTrack Sequence Tracking</p>
+                            </div>
                         </div>
 
-                        <div class="clarification-actions">
-                            <button class="btn-primary" id="btn-save-clarification">Save to Memory & Search</button>
-                            <button class="btn-subtle" id="btn-cancel-clarification">Dismiss</button>
+                        <!-- Lab Sub-Tab Navigation -->
+                        <div class="lab-tab-nav">
+                            <button class="lab-tab-btn active" id="tab-btn-lab-upload" data-tab="upload">
+                                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                                <span>Upload & Analyze</span>
+                            </button>
+                            <button class="lab-tab-btn" id="tab-btn-lab-results" data-tab="results">
+                                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polygon points="10 8 16 12 10 16 10 8"/></svg>
+                                <span>Tracking Results</span>
+                                <span class="tab-badge-counter hidden" id="lab-active-job-badge">ACTIVE</span>
+                            </button>
+                            <button class="lab-tab-btn" id="tab-btn-lab-history" data-tab="history">
+                                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                                <span>Job History</span>
+                                <span class="tab-badge-counter" id="lab-history-count">0</span>
+                            </button>
                         </div>
                     </div>
 
-                    <!-- Query Preset Chips -->
-                    <div class="preset-chips">
-                        <button class="chip" data-query="Show the moving white car">🚗 Show moving white car</button>
-                        <button class="chip" data-query="Show the moving red car">🔴 Show red car (test reject)</button>
-                        <button class="chip" data-query="Show the person with a bag">🎒 Person with bag</button>
-                        <button class="chip" data-query="How many people passed through the camera?">👥 Count people</button>
-                        <button class="chip" data-query="How many cars passed through the camera?">🚘 Count cars</button>
-                        <button class="chip" data-query="What objects were detected?">📋 Object inventory</button>
-                        <button class="chip" data-query="Did a red car pass?">❓ Did a red car pass?</button>
-                        <button class="chip" data-query="Did the white car pass?">✅ Did white car pass?</button>
-                        <button class="chip" data-query="What happened in the first 5 seconds?">⏱️ First 5 seconds</button>
+                    <!-- SUB-PANE 1: UPLOAD & ANALYZE -->
+                    <div class="lab-pane active-pane" id="lab-pane-upload">
+                        <!-- Dropzone Container -->
+                        <div class="lab-upload-grid">
+                            <div class="panel-card lab-dropzone-card">
+                                <div class="lab-dropzone" id="lab-dropzone">
+                                    <div class="lab-dropzone-icon">
+                                        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                                    </div>
+                                    <h3 class="lab-dropzone-prompt">Drag and drop CCTV video file here</h3>
+                                    <p class="lab-dropzone-sub">or click below to browse from your device</p>
+                                    <div class="lab-dropzone-actions">
+                                        <button type="button" class="btn-primary" id="btn-lab-browse">
+                                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                                            <span>Browse Video Files</span>
+                                        </button>
+                                        <button type="button" class="btn-subtle" id="btn-lab-load-sample" title="Instantly load pre-bundled CCTV footage">
+                                            <span>Load Sample CCTV (Pedestrians)</span>
+                                        </button>
+                                    </div>
+                                    <input type="file" id="lab-file-input" accept="video/mp4,video/quicktime,video/x-matroska,video/x-msvideo,video/webm" style="display:none;" />
+                                    <div class="lab-dropzone-guidance">
+                                        <span>Supported formats: <strong>MP4, MOV, MKV, AVI, WebM</strong></span>
+                                        <span>•</span>
+                                        <span>Max size: <strong>250 MB</strong></span>
+                                        <span>•</span>
+                                        <span>Validation: <strong>Magic Bytes & Video Decoders</strong></span>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Selected File Preview & Parameter Config -->
+                            <div class="panel-card lab-preview-card hidden" id="lab-file-preview-card">
+                                <div class="card-header-bar">
+                                    <div class="card-title-group">
+                                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="23 7 16 12 23 17 23 7"></polygon><rect x="1" y="5" width="15" height="14" rx="2" ry="2"></rect></svg>
+                                        <span>Video Submission Preview</span>
+                                    </div>
+                                    <button class="btn-icon-subtle" id="btn-lab-clear-file" title="Remove selected file">&times;</button>
+                                </div>
+                                <div class="panel-body-padded">
+                                    <div class="lab-video-preview-wrapper">
+                                        <video id="lab-local-preview" controls class="lab-preview-video" preload="metadata"></video>
+                                    </div>
+
+                                    <div class="lab-file-meta-grid">
+                                        <div class="lab-meta-item">
+                                            <span class="lab-meta-label">File Name</span>
+                                            <span class="lab-meta-val" id="lab-meta-filename">--</span>
+                                        </div>
+                                        <div class="lab-meta-item">
+                                            <span class="lab-meta-label">File Size</span>
+                                            <span class="lab-meta-val" id="lab-meta-filesize">--</span>
+                                        </div>
+                                        <div class="lab-meta-item">
+                                            <span class="lab-meta-label">Duration</span>
+                                            <span class="lab-meta-val" id="lab-meta-duration">--</span>
+                                        </div>
+                                        <div class="lab-meta-item">
+                                            <span class="lab-meta-label">Resolution</span>
+                                            <span class="lab-meta-val" id="lab-meta-resolution">--</span>
+                                        </div>
+                                    </div>
+
+                                    <div class="lab-config-options">
+                                        <label class="lab-label">Processing Sampling Rate:</label>
+                                        <div class="lab-radio-group">
+                                            <label class="lab-radio-chip">
+                                                <input type="radio" name="lab-sampling" value="15" checked />
+                                                <span>Balanced (~1 FPS / Step 15)</span>
+                                            </label>
+                                            <label class="lab-radio-chip">
+                                                <input type="radio" name="lab-sampling" value="5" />
+                                                <span>High Density (~3 FPS / Step 5)</span>
+                                            </label>
+                                            <label class="lab-radio-chip">
+                                                <input type="radio" name="lab-sampling" value="2" />
+                                                <span>Dense Tracking (Step 2)</span>
+                                            </label>
+                                        </div>
+                                    </div>
+
+                                    <div class="lab-action-row">
+                                        <button class="btn-primary lab-btn-analyze" id="btn-lab-start-analyze">
+                                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
+                                            <span>Analyze Video with YOLO-World & ByteTrack</span>
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Real-time Processing Card -->
+                        <div class="panel-card lab-processing-card hidden" id="lab-processing-card">
+                            <div class="card-header-bar">
+                                <div class="card-title-group">
+                                    <span class="live-dot-pulse"></span>
+                                    <span>AI Background Processing in Progress</span>
+                                </div>
+                                <button class="btn-danger btn-sm" id="btn-lab-cancel-job">Cancel Analysis</button>
+                            </div>
+                            <div class="panel-body-padded">
+                                <div class="lab-progress-wrapper">
+                                    <div class="lab-progress-header">
+                                        <span class="lab-stage-text" id="lab-stage-text">Initializing AI Model...</span>
+                                        <span class="lab-pct-text" id="lab-progress-pct">0%</span>
+                                    </div>
+                                    <div class="lab-progress-track">
+                                        <div class="lab-progress-fill" id="lab-progress-bar" style="width: 0%;"></div>
+                                    </div>
+                                </div>
+
+                                <div class="lab-stats-deck">
+                                    <div class="lab-stat-box">
+                                        <span class="lab-stat-num" id="lab-stat-frames">0 / 0</span>
+                                        <span class="lab-stat-lbl">Video Frames Analyzed</span>
+                                    </div>
+                                    <div class="lab-stat-box">
+                                        <span class="lab-stat-num accent-cyan-text" id="lab-stat-tracks">0</span>
+                                        <span class="lab-stat-lbl">Unique Track IDs</span>
+                                    </div>
+                                    <div class="lab-stat-box">
+                                        <span class="lab-stat-num accent-green-text" id="lab-stat-detections">0</span>
+                                        <span class="lab-stat-lbl">Total Detections</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Error Card -->
+                        <div class="panel-card lab-error-card hidden" id="lab-error-card">
+                            <div class="card-header-bar" style="border-color:var(--red-critical);">
+                                <div class="card-title-group" style="color:var(--red-critical);">
+                                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+                                    <span>Analysis Error</span>
+                                </div>
+                            </div>
+                            <div class="panel-body-padded">
+                                <p id="lab-error-msg" class="lab-error-text">An unexpected error occurred during processing.</p>
+                                <button class="btn-subtle" id="btn-lab-error-retry">Dismiss & Retry</button>
+                            </div>
+                        </div>
                     </div>
 
-                    <!-- Input Bar -->
-                    <form class="query-input-form" id="query-form">
-                        <input type="text" id="query-input" placeholder="Ask about video content (e.g., 'Show the white car', 'How many cars passed?')..." autocomplete="off" required />
-                        <button type="submit" id="btn-submit-query" class="btn-send" title="Send query">
-                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
-                        </button>
-                    </form>
-                </div>
-            </section>
-        </main>
+                    <!-- SUB-PANE 2: TRACKING RESULTS -->
+                    <div class="lab-pane hidden" id="lab-pane-results">
+                        <div class="lab-results-top-bar">
+                            <div class="lab-results-title-group">
+                                <h3 class="lab-results-filename" id="lab-res-filename">Video Analysis Report</h3>
+                                <div class="lab-results-tags" id="lab-res-tags">
+                                    <span class="chip-status-ready" id="lab-res-status">COMPLETED</span>
+                                    <span class="chip-meta" id="lab-res-duration">-- sec</span>
+                                    <span class="chip-meta" id="lab-res-resolution">--</span>
+                                    <span class="chip-meta" id="lab-res-fps">-- FPS</span>
+                                </div>
+                            </div>
+                            <div class="lab-results-actions">
+                                <a id="btn-lab-dl-video" class="btn-primary btn-sm" download>
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                                    <span>Download Annotated Video</span>
+                                </a>
+                                <a id="btn-lab-dl-json" class="btn-subtle btn-sm" download>
+                                    <span>Download JSON</span>
+                                </a>
+                                <a id="btn-lab-dl-csv" class="btn-subtle btn-sm" download>
+                                    <span>Download CSV</span>
+                                </a>
+                                <button id="btn-lab-analyze-another" class="btn-subtle btn-sm">
+                                    <span>Analyze Another</span>
+                                </button>
+                            </div>
+                        </div>
 
-        <!-- BOTTOM SECTION: EVENT TIMELINE -->
-        <footer class="bottom-timeline">
-            <div class="timeline-header">
-                <div class="timeline-title">
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-                    <h3>Event Timeline</h3>
-                    <span class="timeline-scope-badge" id="timeline-scope-badge">Current Camera</span>
-                </div>
-                <div class="timeline-filters" id="timeline-filters-container">
-                    <!-- Populated dynamically based on cameras -->
-                </div>
-            </div>
+                        <!-- Video Player Comparison Deck -->
+                        <div class="panel-card lab-player-card">
+                            <div class="card-header-bar">
+                                <div class="card-title-group">
+                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
+                                    <span>Video Playback Inspection</span>
+                                </div>
+                                <div class="lab-view-mode-toggle">
+                                    <button class="lab-mode-btn active" id="btn-lab-view-annotated">Annotated AI Video</button>
+                                    <button class="lab-mode-btn" id="btn-lab-view-original">Original Source Video</button>
+                                    <button class="lab-mode-btn" id="btn-lab-view-dual">Side-by-Side Dual</button>
+                                </div>
+                            </div>
+                            <div class="panel-body-padded">
+                                <div class="lab-players-grid" id="lab-players-grid">
+                                    <!-- Annotated Player -->
+                                    <div class="lab-player-wrapper" id="wrap-player-annotated">
+                                        <div class="lab-player-label">
+                                            <span class="dot-accent cyan"></span>
+                                            <span>Annotated Feed (YOLO-World Bounding Boxes + ByteTrack IDs)</span>
+                                        </div>
+                                        <video id="lab-video-annotated" controls class="lab-screen-video" preload="auto"></video>
+                                    </div>
+                                    <!-- Original Player -->
+                                    <div class="lab-player-wrapper hidden" id="wrap-player-original">
+                                        <div class="lab-player-label">
+                                            <span class="dot-accent"></span>
+                                            <span>Original CCTV Footage</span>
+                                        </div>
+                                        <video id="lab-video-original" controls class="lab-screen-video" preload="auto"></video>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
 
-            <div class="timeline-track" id="timeline-track">
-                <div class="skeleton-loader">Loading events...</div>
-            </div>
-        </footer>
+                        <!-- Key Metrics Deck -->
+                        <div class="metrics-deck" style="margin-top:16px;">
+                            <div class="metric-card accent-cyan">
+                                <div class="metric-icon-wrap">
+                                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+                                </div>
+                                <div class="metric-data">
+                                    <span class="metric-value" id="lab-res-unique-tracks">0</span>
+                                    <span class="metric-label">Unique Track IDs</span>
+                                </div>
+                            </div>
+
+                            <div class="metric-card accent-green">
+                                <div class="metric-icon-wrap">
+                                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><line x1="9" y1="9" x2="15" y2="15"/><line x1="15" y1="9" x2="9" y2="15"/></svg>
+                                </div>
+                                <div class="metric-data">
+                                    <span class="metric-value" id="lab-res-total-detections">0</span>
+                                    <span class="metric-label">Total Detections</span>
+                                </div>
+                            </div>
+
+                            <div class="metric-card accent-violet">
+                                <div class="metric-icon-wrap">
+                                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 2 7 12 12 22 7 12 2"></polygon><polyline points="2 17 12 22 22 17"></polyline><polyline points="2 12 12 17 22 12"></polyline></svg>
+                                </div>
+                                <div class="metric-data">
+                                    <span class="metric-value" id="lab-res-classes-count">0</span>
+                                    <span class="metric-label">Distinct Classes</span>
+                                </div>
+                            </div>
+
+                            <div class="metric-card accent-amber">
+                                <div class="metric-icon-wrap">
+                                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                                </div>
+                                <div class="metric-data">
+                                    <span class="metric-value" id="lab-res-frames-ratio">0 / 0</span>
+                                    <span class="metric-label">Frames Processed</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Tracking Identity Disclaimer Callout -->
+                        <div class="lab-disclaimer-callout">
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+                            <div class="lab-disclaimer-content">
+                                <strong>Computer Vision Integrity Notice:</strong>
+                                <span>ByteTrack tracking IDs are sequence-local trajectory tokens within this video footage. They track object motion across consecutive frames but do not establish a person's biometric identity or claim cross-camera re-identification.</span>
+                            </div>
+                        </div>
+
+                        <!-- Class Breakdown Badges Deck -->
+                        <div class="panel-card" style="margin-top:16px;">
+                            <div class="card-header-bar">
+                                <div class="card-title-group">
+                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+                                    <span>Detected Object Classes Breakdown</span>
+                                </div>
+                            </div>
+                            <div class="panel-body-padded">
+                                <div class="lab-class-pills" id="lab-class-pills">
+                                    <span class="lab-pill">No objects detected</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Interactive Detection Timeline -->
+                        <div class="panel-card" style="margin-top:16px;">
+                            <div class="card-header-bar">
+                                <div class="card-title-group">
+                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                                    <span>Interactive Detection Event Timeline</span>
+                                    <span class="badge-subtle" id="lab-timeline-count">0 Events</span>
+                                </div>
+                                <div class="lab-timeline-filter-tabs">
+                                    <button class="lab-filter-tab active" data-filter="all">All</button>
+                                    <button class="lab-filter-tab" data-filter="person">People</button>
+                                    <button class="lab-filter-tab" data-filter="vehicle">Vehicles</button>
+                                    <button class="lab-filter-tab" data-filter="other">Other</button>
+                                </div>
+                            </div>
+                            <div class="panel-body-padded">
+                                <p class="lab-hint-text">Click on any event or timestamp to seek video playback directly to that detection moment.</p>
+                                <div class="lab-timeline-scroll" id="lab-timeline-scroll">
+                                    <!-- Rendered dynamically -->
+                                    <div class="empty-state-card">No detection events recorded for this video.</div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Unique Object Evidence Keyframes Gallery -->
+                        <div class="panel-card" style="margin-top:16px;">
+                            <div class="card-header-bar">
+                                <div class="card-title-group">
+                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+                                    <span>Keyframe Evidence Crops (Tracked Objects)</span>
+                                </div>
+                            </div>
+                            <div class="panel-body-padded">
+                                <div class="lab-evidence-grid" id="lab-evidence-grid">
+                                    <!-- Rendered dynamically -->
+                                    <div class="empty-state-card">No evidence crops available.</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- SUB-PANE 3: JOB HISTORY -->
+                    <div class="lab-pane hidden" id="lab-pane-history">
+                        <div class="panel-card">
+                            <div class="card-header-bar">
+                                <div class="card-title-group">
+                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                                    <span>Historical AI Analysis Jobs</span>
+                                </div>
+                                <button class="btn-subtle btn-sm" id="btn-lab-refresh-history">
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+                                    <span>Refresh History</span>
+                                </button>
+                            </div>
+                            <div class="panel-body-padded">
+                                <div class="table-responsive">
+                                    <table class="data-table" id="lab-history-table">
+                                        <thead>
+                                            <tr>
+                                                <th>Video Filename</th>
+                                                <th>Created Time</th>
+                                                <th>Duration</th>
+                                                <th>Resolution</th>
+                                                <th>Status</th>
+                                                <th>Track IDs</th>
+                                                <th>Detections</th>
+                                                <th>Actions</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody id="lab-history-tbody">
+                                            <tr><td colspan="8" style="text-align:center; color:var(--text-muted);">No analysis jobs recorded yet.</td></tr>
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </main>
+        </div>
     </div>
 
+    <!-- ============================================================
+         MODALS & DIALOGS (Preserved 100% ID compatibility)
+         ============================================================ -->
+    
     <!-- VIDEO UPLOAD MODAL -->
     <div class="modal hidden" id="upload-modal">
-        <div class="modal-content upload-modal-content">
+        <div class="modal-content">
             <div class="modal-header">
-                <div class="modal-title-wrap">
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#38bdf8" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
-                    <h3>Upload CCTV Video Stream</h3>
-                </div>
+                <h3>Upload CCTV Video Footage</h3>
                 <button class="btn-close" id="btn-close-upload-modal">&times;</button>
             </div>
-            
             <form id="upload-form">
-                <div class="upload-dropzone" id="upload-dropzone">
+                <div class="upload-dropzone" id="upload-dropzone" style="border:2px dashed var(--border-color); padding:24px; text-align:center; border-radius:var(--radius-sm); cursor:pointer; background:var(--bg-sidebar); margin-bottom:12px;">
                     <input type="file" id="video-file-input" accept=".mp4,.mov,.avi,.mkv" style="display:none;" required />
-                    <div class="dropzone-inner" id="dropzone-prompt">
-                        <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="var(--text-secondary)" stroke-width="1.5"><path d="M4 14.899A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.5 8.242"/><path d="M12 12v9"/><path d="m16 16-4-4-4 4"/></svg>
-                        <p class="drop-title">Click to browse or drag CCTV video file here</p>
-                        <p class="drop-subtitle">Supported formats: <strong>MP4, MOV, AVI, MKV</strong></p>
+                    <div id="dropzone-prompt">
+                        <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="var(--cyan-primary)" stroke-width="1.8"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                        <p style="font-weight:700; color:var(--text-main); margin-top:6px; font-size:0.84rem;">Click or drag CCTV video file here</p>
+                        <p style="font-size:0.7rem; color:var(--text-muted); margin-top:2px;">Supported: MP4, MOV, AVI, MKV</p>
                     </div>
                     <div class="file-details hidden" id="file-details">
-                        <div class="file-info-row">
-                            <span class="file-name" id="selected-filename">video.mp4</span>
-                            <span class="file-size" id="selected-filesize">0 MB</span>
-                        </div>
+                        <span id="selected-filename" style="color:var(--cyan-primary); font-weight:700; font-size:0.8rem;">video.mp4</span>
+                        <span id="selected-filesize" style="color:var(--text-muted); font-size:0.74rem; margin-left:6px;">0 MB</span>
                     </div>
                 </div>
 
-                <div class="form-group" style="margin-top: 12px;">
-                    <label for="upload-camera-name">Camera Name / Description (Optional):</label>
-                    <input type="text" id="upload-camera-name" placeholder="e.g., Gate Camera, Perimeter Feed" />
+                <div class="form-group">
+                    <label for="upload-camera-name">Camera Name / Location Tag:</label>
+                    <input type="text" id="upload-camera-name" placeholder="e.g. North Gate CCTV, Perimeter Feed" />
                 </div>
 
                 <!-- Live Progress Tracking -->
-                <div class="progress-section hidden" id="upload-progress-box">
-                    <div class="progress-stage-info">
-                        <span class="stage-label" id="progress-stage-label">Uploading Video...</span>
-                        <span class="stage-pct" id="progress-pct">0%</span>
+                <div class="progress-section hidden" id="upload-progress-box" style="margin-bottom:12px;">
+                    <div style="display:flex; justify-content:space-between; font-size:0.72rem; margin-bottom:4px;">
+                        <span id="progress-stage-label" style="color:var(--cyan-primary); font-weight:600;">Processing Video...</span>
+                        <span id="progress-pct" style="color:var(--text-main); font-weight:700;">0%</span>
                     </div>
-                    <div class="progress-bar-bg">
-                        <div class="progress-bar-fill" id="progress-bar-fill" style="width: 0%;"></div>
-                    </div>
-                    <div class="progress-steps-list">
-                        <div class="step-item" id="step-upload">1. Upload File</div>
-                        <div class="step-item" id="step-detect">2. Object Detection (YOLO-World)</div>
-                        <div class="step-item" id="step-track">3. ByteTrack & Attribute Analysis</div>
-                        <div class="step-item" id="step-index">4. FAISS Embedding Indexing</div>
+                    <div style="background:var(--bg-sidebar); height:6px; border-radius:3px; overflow:hidden;">
+                        <div id="progress-bar-fill" style="background:linear-gradient(90deg, #258BFF, #13D9F5); height:100%; width:0%;"></div>
                     </div>
                 </div>
 
-                <div class="modal-footer">
-                    <button type="submit" class="btn-primary" id="btn-start-upload">Upload & Analyze</button>
+                <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:16px;">
+                    <button type="submit" class="btn-primary" id="btn-start-upload">Upload & Index</button>
                     <button type="button" class="btn-subtle" id="btn-cancel-upload">Cancel</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- CONNECT LIVE CAMERA MODAL -->
+    <div class="modal hidden" id="connect-modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Connect Live Camera Stream</h3>
+                <button class="btn-close" id="btn-close-connect-modal">&times;</button>
+            </div>
+            <form id="connect-camera-form">
+                <div class="form-group">
+                    <label for="connect-source-type">Camera Stream Source:</label>
+                    <select id="connect-source-type">
+                        <option value="webcam">USB / Built-in Webcam (Local Device Index)</option>
+                        <option value="rtsp">RTSP IP Camera Stream</option>
+                        <option value="youtube_live">YouTube Live Stream (Public URL)</option>
+                        <option value="test_video">Local Test Video Stream (Development)</option>
+                    </select>
+                </div>
+
+                <div class="form-group" id="group-webcam-index">
+                    <label for="connect-webcam-index">Webcam Device Index:</label>
+                    <input type="number" id="connect-webcam-index" min="0" max="10" value="0" />
+                </div>
+
+                <div class="form-group hidden" id="group-rtsp-url">
+                    <label for="connect-rtsp-url">RTSP Stream URL:</label>
+                    <input type="text" id="connect-rtsp-url" placeholder="rtsp://admin:password@192.168.1.100:554/stream" />
+                </div>
+
+                <div class="form-group hidden" id="group-youtube-url">
+                    <label for="connect-youtube-url">YouTube Live Stream URL:</label>
+                    <input type="text" id="connect-youtube-url" placeholder="https://www.youtube.com/live/..." />
+                    <div style="display:flex; gap:6px; margin-top:6px; flex-wrap:wrap;">
+                        <button type="button" class="btn-subtle btn-sm btn-sample-chip" data-yt-url="https://www.youtube.com/live/DjdUEyjx8GM" data-cam-name="Tokyo Kabukicho Pedestrian Live">🏙️ Tokyo Pedestrian</button>
+                        <button type="button" class="btn-subtle btn-sm btn-sample-chip" data-yt-url="https://www.youtube.com/watch?v=1EiC9bvVGnk" data-cam-name="Town Square Traffic & Crosswalk">🚦 Town Square Crosswalk</button>
+                        <button type="button" class="btn-subtle btn-sm btn-sample-chip" data-yt-url="https://www.youtube.com/live/i10aOLMK76k" data-cam-name="City Tower & Highway Live">🗼 City Highway Live</button>
+                        <button type="button" class="btn-subtle btn-sm btn-sample-chip" data-yt-url="https://www.youtube.com/live/u_Rui4z-f2A" data-cam-name="Market Square Plaza Surveillance">🏛️ Market Square Plaza</button>
+                    </div>
+                </div>
+
+                <div class="form-group hidden" id="group-test-video">
+                    <label for="connect-test-path">Test Video Source File:</label>
+                    <input type="text" id="connect-test-path" value="test_cctv.mp4" />
+                </div>
+
+                <div class="form-group">
+                    <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
+                        <input type="checkbox" id="connect-record-stream" style="accent-color:var(--emerald-status);" />
+                        <span>Enable Segmented Local Video Recording (5-min MP4 segments)</span>
+                    </label>
+                </div>
+
+                <div class="form-group">
+                    <label for="connect-camera-name">Camera Name (Optional):</label>
+                    <input type="text" id="connect-camera-name" placeholder="e.g. South Perimeter Cam" />
+                </div>
+
+                <div class="form-group">
+                    <label for="connect-camera-id">Camera ID (Optional):</label>
+                    <input type="text" id="connect-camera-id" placeholder="Leave empty to auto-generate" />
+                </div>
+
+                <div class="connect-status-box hidden" id="connect-status-box" style="padding:10px; border-radius:var(--radius-sm); font-size:0.78rem; background:rgba(8,21,43,0.8); border:1px solid var(--border-color); margin-bottom:12px;">
+                    <div id="connect-status-text">⏳ Connecting to stream...</div>
+                </div>
+
+                <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:14px;">
+                    <button type="submit" class="btn-cyan" id="btn-submit-connect">Connect Stream</button>
+                    <button type="button" class="btn-subtle" id="btn-cancel-connect">Cancel</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- ALERT RULES MANAGEMENT MODAL -->
+    <div class="modal hidden" id="alert-rules-modal">
+        <div class="modal-content modal-lg">
+            <div class="modal-header">
+                <h3>Configure Alert Rules & Tripwires</h3>
+                <button class="btn-close" id="btn-close-rules-modal">&times;</button>
+            </div>
+            
+            <div class="rules-subnav" style="display:flex; gap:8px; margin-bottom:14px; border-bottom:1px solid var(--border-color); padding-bottom:8px;">
+                <button class="btn-subtle active" id="tab-btn-rule-list">Active Rules (<span id="rule-list-count">0</span>)</button>
+                <button class="btn-subtle" id="tab-btn-rule-create">+ Create New Rule</button>
+            </div>
+
+            <div id="tab-content-rule-list">
+                <table class="alerts-data-table">
+                    <thead>
+                        <tr>
+                            <th>Status</th>
+                            <th>Rule Name</th>
+                            <th>Type</th>
+                            <th>Target Class</th>
+                            <th>Severity</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="rules-table-body">
+                        <tr><td colspan="6" style="text-align:center; padding:20px; color:var(--text-muted);">No rules configured yet.</td></tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <div id="tab-content-rule-create" class="hidden">
+                <form id="create-rule-form">
+                    <div class="form-group">
+                        <label for="rule-name">Rule Name:</label>
+                        <input type="text" id="rule-name" placeholder="e.g. Unauthorized Night Entry, Tripwire Ingress" required />
+                    </div>
+                    <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
+                        <div class="form-group">
+                            <label for="rule-camera">Camera Scope:</label>
+                            <select id="rule-camera">
+                                <option value="">All Registered Cameras</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="rule-type">Rule Type:</label>
+                            <select id="rule-type" required>
+                                <option value="object_detected">1. Object Detected in Camera</option>
+                                <option value="restricted_hours">2. Restricted Hours (e.g. Overnight)</option>
+                                <option value="zone_entry">3. Polygon Zone Entry</option>
+                                <option value="tripwire_crossing">4. Virtual Tripwire Crossing</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
+                        <div class="form-group">
+                            <label for="rule-target-class">Target Object Class:</label>
+                            <input type="text" id="rule-target-class" placeholder="person, car, or empty for any" />
+                        </div>
+                        <div class="form-group">
+                            <label for="rule-min-conf">Min Confidence:</label>
+                            <input type="number" id="rule-min-conf" min="0.1" max="1.0" step="0.05" value="0.30" required />
+                        </div>
+                    </div>
+                    <div class="form-group" id="row-rule-geometry">
+                        <label for="rule-coords-input">Geometry Coordinates (Normalized [[x1,y1],[x2,y2]]):</label>
+                        <input type="text" id="rule-coords-input" placeholder="Use 'Draw Rule' on live monitoring video or paste JSON" />
+                    </div>
+                    <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
+                        <div class="form-group">
+                            <label for="rule-severity">Alert Severity:</label>
+                            <select id="rule-severity">
+                                <option value="warning" selected>Warning (Amber)</option>
+                                <option value="critical">Critical (Red)</option>
+                                <option value="info">Info (Blue)</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="rule-cooldown">Cooldown Interval (Seconds):</label>
+                            <input type="number" id="rule-cooldown" min="0" max="3600" value="30" required />
+                        </div>
+                    </div>
+                    <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:14px;">
+                        <button type="submit" class="btn-primary" id="btn-submit-rule">Save & Activate Rule</button>
+                        <button type="button" class="btn-subtle" id="btn-cancel-create-rule">Back to List</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- ALERTS HISTORY LOG MODAL -->
+    <div class="modal hidden" id="alerts-history-modal">
+        <div class="modal-content modal-xl">
+            <div class="modal-header">
+                <h3>Security Alerts Audit Log</h3>
+                <button class="btn-close" id="btn-close-alerts-modal">&times;</button>
+            </div>
+            <div style="overflow-x:auto; max-height:500px;">
+                <table class="alerts-data-table">
+                    <thead>
+                        <tr>
+                            <th>Timestamp</th>
+                            <th>Severity</th>
+                            <th>Camera</th>
+                            <th>Rule Name</th>
+                            <th>Trigger Reason</th>
+                            <th>Status</th>
+                            <th>Action</th>
+                        </tr>
+                    </thead>
+                    <tbody id="alerts-table-body">
+                        <tr><td colspan="7" style="text-align:center; padding:20px; color:var(--text-muted);">No recorded alerts.</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- ADD LANDMARK MEMORY MODAL -->
+    <div class="modal hidden" id="memory-modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Add Clarify-Once Landmark Reference</h3>
+                <button class="btn-close" id="btn-close-modal">&times;</button>
+            </div>
+            <form id="memory-modal-form">
+                <div class="form-group">
+                    <label for="mem-name">Landmark Name (e.g. 'main gate', 'loading dock'):</label>
+                    <input type="text" id="mem-name" placeholder="main gate" required />
+                </div>
+                <div class="form-group">
+                    <label for="mem-cam">Assign Camera:</label>
+                    <select id="mem-cam" required></select>
+                </div>
+                <div class="form-group">
+                    <label for="mem-roi">Region ROI (x1, y1, x2, y2):</label>
+                    <input type="text" id="mem-roi" value="0.0, 0.0, 768.0, 432.0" required />
+                </div>
+                <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:14px;">
+                    <button type="submit" class="btn-primary">Save Landmark Memory</button>
+                    <button type="button" class="btn-subtle" id="btn-cancel-modal">Cancel</button>
                 </div>
             </form>
         </div>
@@ -340,54 +1325,23 @@
 
     <!-- RESET CONFIRMATION MODAL -->
     <div class="modal hidden" id="reset-modal">
-        <div class="modal-content modal-danger">
+        <div class="modal-content" style="border-color:var(--red-critical);">
             <div class="modal-header">
-                <div class="modal-title-wrap">
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--status-error)" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
-                    <h3 style="color: var(--status-error);">Reset All Uploaded Data?</h3>
-                </div>
+                <h3 style="color:var(--red-critical);">Reset All System Data?</h3>
                 <button class="btn-close" id="btn-close-reset-modal">&times;</button>
             </div>
-            <p style="font-size: 0.82rem; color: var(--text-secondary); line-height: 1.5;">
-                This action will permanently delete <strong>all registered cameras, uploaded videos, tracked visual events, representative frames, evidence clips, and vector search embeddings</strong>.
+            <p style="font-size:0.8rem; color:var(--text-secondary); line-height:1.5; margin-bottom:12px;">
+                This action permanently purges <strong>all registered cameras, uploaded CCTV videos, tracked events, vector indexes, and visual evidence clips</strong>.
             </p>
-            <p style="font-size: 0.8rem; color: #fca5a5; font-weight: 600;">
-                The application will return to an empty 0-camera clean state ready for fresh uploads.
-            </p>
-            <div class="modal-footer">
-                <button type="button" class="btn-danger" id="btn-confirm-reset">Permanently Reset All Data</button>
+            <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:16px;">
+                <button type="button" class="btn-danger" id="btn-confirm-reset">Permanently Reset</button>
                 <button type="button" class="btn-subtle" id="btn-cancel-reset">Cancel</button>
             </div>
         </div>
     </div>
 
-    <!-- ADD MEMORY MODAL -->
-    <div class="modal hidden" id="memory-modal">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h3>Add Landmark Reference</h3>
-                <button class="btn-close" id="btn-close-modal">&times;</button>
-            </div>
-            <form id="memory-modal-form">
-                <div class="form-group">
-                    <label for="mem-name">Landmark Name (e.g., 'main gate', 'loading dock'):</label>
-                    <input type="text" id="mem-name" placeholder="main gate" required />
-                </div>
-                <div class="form-group">
-                    <label for="mem-cam">Assign Camera:</label>
-                    <select id="mem-cam" class="custom-select" required></select>
-                </div>
-                <div class="form-group">
-                    <label for="mem-roi">Region ROI (x1, y1, x2, y2):</label>
-                    <input type="text" id="mem-roi" value="0.0, 0.0, 768.0, 432.0" required />
-                </div>
-                <div class="modal-footer">
-                    <button type="submit" class="btn-primary">Save Memory</button>
-                    <button type="button" class="btn-subtle" id="btn-cancel-modal">Cancel</button>
-                </div>
-            </form>
-        </div>
-    </div>
+    <!-- TOAST CONTAINER -->
+    <div class="toast-container" id="toast-container"></div>
 
     <script src="app.js"></script>
 </body>

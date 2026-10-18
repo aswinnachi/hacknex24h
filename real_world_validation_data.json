@@ -1,0 +1,119 @@
+{
+  "api_server_status": "REACHABLE",
+  "three_cameras_connected": true,
+  "per_camera_initial_health": {
+    "LIVE_CAM_01_PEDESTRIAN": {
+      "status": "connected",
+      "preview_working": true,
+      "frames_analyzed": 174,
+      "detections_count": 5,
+      "people_count": 5,
+      "active_tracks": 5,
+      "capture_fps": 11.9,
+      "inference_fps": 2.0,
+      "pipeline_health": {
+        "preview_working": true,
+        "frames_reaching_detector": true,
+        "inference_working": true,
+        "tracking_working": true
+      }
+    },
+    "LIVE_CAM_02_TRAFFIC": {
+      "status": "connected",
+      "preview_working": true,
+      "frames_analyzed": 74,
+      "detections_count": 1,
+      "people_count": 1,
+      "active_tracks": 1,
+      "capture_fps": 12.1,
+      "inference_fps": 2.0,
+      "pipeline_health": {
+        "preview_working": true,
+        "frames_reaching_detector": true,
+        "inference_working": true,
+        "tracking_working": true
+      }
+    },
+    "LIVE_CAM_03_EMPTY_SCENE": {
+      "status": "connected",
+      "preview_working": true,
+      "frames_analyzed": 173,
+      "detections_count": 0,
+      "people_count": 0,
+      "active_tracks": 0,
+      "capture_fps": 11.8,
+      "inference_fps": 2.0,
+      "pipeline_health": {
+        "preview_working": true,
+        "frames_reaching_detector": true,
+        "inference_working": true,
+        "tracking_working": true
+      }
+    }
+  },
+  "false_positive_empty_scene_zero_people": true,
+  "zero_detection_camera_healthy": true,
+  "camera_reconnect_isolation": true,
+  "confidence_fidelity_verified": true,
+  "distant_person_preserved": true,
+  "query_regression_ok": true,
+  "negative_rejection_ok": true,
+  "alerts_engine_ok": true,
+  "youtube_audit_performed": true,
+  "sustained_performance_samples": [
+    {
+      "elapsed_s": 5,
+      "c1_inf_fps": 1.9,
+      "c2_inf_fps": 2.0,
+      "c3_inf_fps": 1.9,
+      "latency_ms": 111.6,
+      "cpu_percent": 79.7,
+      "ram_mb": 60.90625
+    },
+    {
+      "elapsed_s": 10,
+      "c1_inf_fps": 1.9,
+      "c2_inf_fps": 1.9,
+      "c3_inf_fps": 1.9,
+      "latency_ms": 38.7,
+      "cpu_percent": 76.5,
+      "ram_mb": 60.953125
+    },
+    {
+      "elapsed_s": 15,
+      "c1_inf_fps": 2.0,
+      "c2_inf_fps": 2.0,
+      "c3_inf_fps": 2.0,
+      "latency_ms": 39.6,
+      "cpu_percent": 75.0,
+      "ram_mb": 60.953125
+    },
+    {
+      "elapsed_s": 20,
+      "c1_inf_fps": 1.9,
+      "c2_inf_fps": 1.9,
+      "c3_inf_fps": 1.9,
+      "latency_ms": 39.2,
+      "cpu_percent": 65.8,
+      "ram_mb": 60.953125
+    },
+    {
+      "elapsed_s": 25,
+      "c1_inf_fps": 1.9,
+      "c2_inf_fps": 1.9,
+      "c3_inf_fps": 1.9,
+      "latency_ms": 49.9,
+      "cpu_percent": 65.7,
+      "ram_mb": 60.953125
+    },
+    {
+      "elapsed_s": 30,
+      "c1_inf_fps": 2.0,
+      "c2_inf_fps": 1.9,
+      "c3_inf_fps": 1.9,
+      "latency_ms": 39.0,
+      "cpu_percent": 68.0,
+      "ram_mb": 60.984375
+    }
+  ]
+}

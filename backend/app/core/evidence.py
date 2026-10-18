@@ -10,6 +10,20 @@ from backend.app.db.database import execute_query
 CLIPS_DIR = "data/clips"
 os.makedirs(CLIPS_DIR, exist_ok=True)
 
+def are_labels_compatible(l1: str, l2: str) -> bool:
+    if l1 == l2: return True
+    car_types = {"car", "suv", "sedan", "automobile"}
+    motorcycle_types = {"motorcycle", "scooter", "motorbike", "moped"}
+    truck_types = {"truck", "pickup", "lorry"}
+    bus_types = {"bus", "buses"}
+    bicycle_types = {"bicycle", "bike", "cycle"}
+    if l1 in car_types and l2 in car_types: return True
+    if l1 in motorcycle_types and l2 in motorcycle_types: return True
+    if l1 in truck_types and l2 in truck_types: return True
+    if l1 in bus_types and l2 in bus_types: return True
+    if l1 in bicycle_types and l2 in bicycle_types: return True
+    return False
+
 def compute_dense_clip_scene(clip_path: str, clip_start: float = 0.0, clip_end: float = 10.0) -> List[Dict[str, Any]]:
     """
     Retrieves per-frame ground-truth multi-object trajectories across the video clip.
@@ -38,7 +52,8 @@ def compute_dense_clip_scene(clip_path: str, clip_start: float = 0.0, clip_end: 
                 try:
                     with open(cam_scenes[0], "r") as f:
                         full_scene = json.load(f)
-                    fps = 24.0
+                    cam_meta = execute_query("SELECT fps FROM cameras WHERE id = ?", (cam_sub,), fetch=True, fetch_one=True)
+                    fps = float(cam_meta["fps"]) if (cam_meta and cam_meta["fps"] and cam_meta["fps"] > 0) else 24.0
                     start_f = int(clip_start * fps)
                     end_f = int(clip_end * fps)
                     
@@ -108,13 +123,7 @@ def compute_dense_clip_scene(clip_path: str, clip_start: float = 0.0, clip_end: 
         a2 = max(1.0, (b2[2] - b2[0]) * (b2[3] - b2[1]))
         return inter / (a1 + a2 - inter)
 
-    def are_labels_compatible(l1, l2):
-        if l1 == l2: return True
-        v_types = {"car", "suv", "van", "truck", "bus", "vehicle"}
-        two_types = {"motorcycle", "scooter", "bicycle"}
-        if l1 in v_types and l2 in v_types: return True
-        if l1 in two_types and l2 in two_types: return True
-        return False
+
 
     active_tracks = []
     for f_idx in range(0, total_frames, step):
@@ -179,10 +188,12 @@ def compute_dense_clip_scene(clip_path: str, clip_start: float = 0.0, clip_end: 
         dom_raw_label = max(set(t.get("labels", [t["label"]])), key=t.get("labels", [t["label"]]).count)
         
         # Canonical label
-        if dom_raw_label in ("suv", "van", "vehicle"):
+        if dom_raw_label in ("suv", "sedan", "automobile"):
             c_label = "car"
-        elif dom_raw_label in ("scooter", "motorbike"):
+        elif dom_raw_label in ("scooter", "motorbike", "moped"):
             c_label = "motorcycle"
+        elif dom_raw_label in ("pickup", "lorry"):
+            c_label = "truck"
         else:
             c_label = dom_raw_label
             
@@ -310,40 +321,46 @@ def generate_evidence_clip(
     cam_clips_dir = os.path.join(CLIPS_DIR, camera_id)
     os.makedirs(cam_clips_dir, exist_ok=True)
     
+    is_live = cam_dict.get("source_type") in ("live", "youtube_live") or event.get("source_type") in ("live", "youtube_live")
     clip_filename = f"{cam_clips_dir}/clip_{event_id}.mp4"
     
-    clip_start = max(0.0, start_t - buffer_before)
-    clip_end = min(duration, end_t + buffer_after)
-    if clip_end - clip_start < 2.5:
-        clip_end = min(duration, clip_start + 3.0)
-    clip_duration = clip_end - clip_start
-    
-    # Lazy generation: check if file already exists
-    if not os.path.exists(clip_filename) or os.path.getsize(clip_filename) == 0:
-        if video_path and os.path.exists(video_path):
-            try:
-                cmd = [
-                    "ffmpeg", "-y",
-                    "-ss", f"{clip_start:.3f}",
-                    "-to", f"{clip_end:.3f}",
-                    "-i", video_path,
-                    "-c:v", "libx264",
-                    "-preset", "ultrafast",
-                    "-crf", "23",
-                    "-c:a", "aac",
-                    "-movflags", "+faststart",
-                    clip_filename
-                ]
-                res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=10)
-                if res.returncode == 0:
-                    logger.info(f"Generated lazy evidence clip: {clip_filename} ({clip_duration:.2f}s)")
-                    execute_query("UPDATE events SET clip_path = ? WHERE id = ?", (clip_filename, event_id))
-                else:
-                    logger.error(f"FFmpeg failed to generate clip: {res.stderr.decode('utf-8', errors='ignore')}")
-            except Exception as e:
-                logger.error(f"Exception during clip generation for event {event_id}: {e}")
-        else:
-            logger.warning(f"Video file not found at {video_path}")
+    if not is_live:
+        clip_start = max(0.0, start_t - buffer_before)
+        clip_end = min(duration, end_t + buffer_after)
+        if clip_end - clip_start < 2.5:
+            clip_end = min(duration, clip_start + 3.0)
+        clip_duration = clip_end - clip_start
+        
+        # Lazy generation: check if file already exists
+        if not os.path.exists(clip_filename) or os.path.getsize(clip_filename) == 0:
+            if video_path and os.path.exists(video_path):
+                try:
+                    cmd = [
+                        "ffmpeg", "-y",
+                        "-ss", f"{clip_start:.3f}",
+                        "-to", f"{clip_end:.3f}",
+                        "-i", video_path,
+                        "-c:v", "libx264",
+                        "-preset", "ultrafast",
+                        "-crf", "23",
+                        "-c:a", "aac",
+                        "-movflags", "+faststart",
+                        clip_filename
+                    ]
+                    res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=10)
+                    if res.returncode == 0:
+                        logger.info(f"Generated lazy evidence clip: {clip_filename} ({clip_duration:.2f}s)")
+                        execute_query("UPDATE events SET clip_path = ? WHERE id = ?", (clip_filename, event_id))
+                    else:
+                        logger.error(f"FFmpeg failed to generate clip: {res.stderr.decode('utf-8', errors='ignore')}")
+                except Exception as e:
+                    logger.error(f"Exception during clip generation for event {event_id}: {e}")
+            else:
+                logger.warning(f"Video file not found at {video_path}")
+    else:
+        clip_start = 0.0
+        clip_end = 0.0
+        clip_duration = 0.0
             
     # Parse bounding boxes
     bboxes = []
@@ -393,18 +410,28 @@ def generate_evidence_clip(
             best_score = -1.0
             clip_offset = max(0.0, start_t - clip_start)
 
+            clip_fps = float(cam_dict.get("fps") or 24.0)
             for cand in scene_objects:
                 c_score = 0.0
                 cand_conc = (cand.get("concept") or "").lower()
                 cand_col = (cand.get("color") or "unknown").lower()
                 
-                if cand_conc == target_concept:
-                    c_score += 3.0
+                # Concept MUST be compatible - hard constraint
+                if not are_labels_compatible(cand_conc, target_concept):
+                    continue
+                c_score += 3.0
+
+                # Exact tracking ID match priority
+                cand_tid = str(cand.get("tracking_id", ""))
+                ev_tid = str(event.get("tracking_id", ""))
+                if ev_tid and cand_tid and cand_tid == ev_tid:
+                    c_score += 10.0
+                
                 if target_color != "unknown" and cand_col == target_color:
                     c_score += 5.0
                     
                 # Time alignment with target appearance in clip
-                cand_start_sec = cand.get("start_frame", 0) / 25.0
+                cand_start_sec = cand.get("start_frame", 0) / clip_fps
                 time_diff = abs(cand_start_sec - clip_offset)
                 c_score += max(0.0, 4.0 - time_diff)
 
@@ -438,18 +465,45 @@ def generate_evidence_clip(
             "is_target": True
         })
 
+    clip_exists = os.path.exists(clip_filename) and os.path.getsize(clip_filename) > 0
+    frame_exists = bool(frame_path and os.path.exists(frame_path) and os.path.getsize(frame_path) > 0)
+
+    if not clip_exists and not frame_exists:
+        verdict = "UNVERIFIED"
+        summary = f"Required visual evidence for {event['concept']} (Track #{event.get('tracking_id')}) is missing on disk."
+    elif is_live:
+        verdict = "VERIFIED"
+        summary = f"Live event confirmed: {event['concept'].capitalize()} (Track #{event.get('tracking_id') or ''}) captured on live camera feed."
+    elif not clip_exists:
+        verdict = "PARTIAL"
+        summary = f"{event['concept'].capitalize()} detected (representative frame verified; clip missing)."
+    else:
+        verdict = "YES"
+        summary = f"{event['concept'].capitalize()} detected and evidence verified."
+
+    if is_live and start_t > 1000000000:
+        from datetime import datetime
+        dt = datetime.fromtimestamp(start_t)
+        time_formatted = dt.strftime("%I:%M:%S %p")
+        time_hms = dt.strftime("%Y-%m-%d %H:%M:%S")
+        video_offset = "LIVE CCTV FEED"
+    else:
+        time_formatted = format_time_12h(start_t)
+        time_hms = format_timestamp(start_t)
+        video_offset = f"{start_t:.2f}s"
+
     return {
         "event_id": event_id,
-        "verdict": "YES",
-        "summary": f"{event['concept'].capitalize()} detected.",
+        "verdict": verdict,
+        "summary": summary,
         "concept": event["concept"],
         "camera_id": camera_id,
         "camera_name": camera_name,
         "tracking_id": event.get("tracking_id"),
         "timestamp": start_t,
-        "time_formatted": format_time_12h(start_t),
-        "time_hms": format_timestamp(start_t),
-        "video_offset": f"{start_t:.2f}s",
+        "time_formatted": time_formatted,
+        "time_hms": time_hms,
+        "video_offset": video_offset,
         "confidence": confidence,
         "relevance_percent": relevance_pct,
         "frame_path": frame_path,

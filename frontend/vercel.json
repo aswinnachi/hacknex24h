@@ -1,0 +1,26 @@
+{
+  "version": 2,
+  "name": "ai-vision-security-frontend",
+  "cleanUrls": true,
+  "trailingSlash": false,
+  "headers": [
+    {
+      "source": "/(.*)",
+      "headers": [
+        { "key": "X-Content-Type-Options", "value": "nosniff" },
+        { "key": "X-Frame-Options", "value": "DENY" },
+        { "key": "Referrer-Policy", "value": "strict-origin-when-cross-origin" }
+      ]
+    }
+  ],
+  "rewrites": [
+    {
+      "source": "/api/:path*",
+      "destination": "https://YOUR_BACKEND_URL/api/:path*"
+    },
+    {
+      "source": "/data/:path*",
+      "destination": "https://YOUR_BACKEND_URL/data/:path*"
+    }
+  ]
+}

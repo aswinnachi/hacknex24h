@@ -13,6 +13,13 @@ class Settings(BaseSettings):
     yolo_model: str = "yolov8s-world.pt"                    # YOLO-World open-vocabulary detector
     frame_sampling_fps: float = 1.0                         # Frame sampling rate (1 FPS default)
 
+    # Configurable Local Evidence & Retention Storage
+    evidence_storage_dir: str = "data/evidence"
+    frames_storage_dir: str = "data/frames/live"
+    clips_storage_dir: str = "data/clips"
+    evidence_retention_days: int = 7
+    max_evidence_storage_gb: float = 10.0
+
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 
 settings = Settings()

@@ -86,9 +86,15 @@ class EmbeddingModel:
             logger.error(f"Error embedding text '{text}': {e}")
             return None
 
+import threading
+
 _embedding_instance = None
+_embedder_lock = threading.Lock()
+
 def get_embedder(model_name: str = None):
     global _embedding_instance
-    if _embedding_instance is None or (model_name and _embedding_instance.model_name != model_name):
-        _embedding_instance = EmbeddingModel(model_name)
-    return _embedding_instance
+    with _embedder_lock:
+        if _embedding_instance is None or (model_name and _embedding_instance.model_name != model_name):
+            _embedding_instance = EmbeddingModel(model_name)
+        return _embedding_instance
+
